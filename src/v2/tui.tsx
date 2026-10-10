@@ -8,7 +8,7 @@
 import { Plugin } from "@opencode/plugin/tui"
 import type { Context } from "@opencode/plugin/tui/context"
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js"
-import { bar, windowLine, type CredentialState, type MeterSnapshot } from "../core/meter.js"
+import { Meter, bar, windowLine, type CredentialState, type MeterSnapshot } from "../core/meter.js"
 import { PacerRpc, type PacerMeterEvent } from "../rpc.js"
 
 const PROBE_MS = 2_000
@@ -59,10 +59,10 @@ function View(props: {
               <text fg={theme.text.base} wrapMode="word">
                 {row.alias}
                 <span style={{ fg: theme.text.muted }}> {row.provider}</span>
-                <Show when={served()?.auth === row.id}>
-                  <span style={{ fg: theme.text.feedback.info.base }}> LAST USED</span>
-                </Show>
               </text>
+              <Show when={served()?.auth === row.id}>
+                <text fg={theme.text.feedback.info.base}>LAST USED</text>
+              </Show>
               <Show when={row.shared_with.length > 0}>
                 <text fg={theme.text.muted}>shared quota with {row.shared_with.join(", ")}</text>
               </Show>
@@ -99,16 +99,24 @@ export function setup(context: Context) {
   const [settings, update] = context.storage.store("scope", { initial: { mode: "model" as "model" | "all" } })
   const state = { disposed: false }
 
+  // Every project location runs its own server half, each with its own meter,
+  // and all of them publish here. Merge them (newest reading per account and
+  // per chat wins) rather than letting the last publisher replace the view.
+  const meter = new Meter()
+  meter.subscribe(() => setSnapshot(meter.snapshot()))
   const apply = (value: unknown) => {
-    if (value && typeof value === "object") setSnapshot(value as MeterSnapshot)
+    if (value && typeof value === "object") meter.restore(value as MeterSnapshot)
   }
   const off = rpc.events.on("meter", (event) =>
     apply((event.data as unknown as PacerMeterEvent | undefined)?.snapshot),
   )
 
+  // Ask the server half of this CLI's own location: that one recorded which
+  // account served the chats started here, so the first view is already scoped.
+  const directory = (context.location ?? context.data.location.default()).directory
   const load = async (attempt: number): Promise<void> => {
     if (state.disposed) return
-    const result = await rpc.snapshot({}).catch(() => undefined)
+    const result = await rpc.snapshot({}, { location: { directory } }).catch(() => undefined)
     if (state.disposed) return
     if (result === undefined) {
       if (attempt < PROBE_ATTEMPTS) unref(setTimeout(() => void load(attempt + 1), PROBE_MS))
