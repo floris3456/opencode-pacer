@@ -1,0 +1,64 @@
+{
+  "name": "opencode-pacer",
+  "version": "0.1.0",
+  "description": "CLIProxyAPI in opencode: /connect, model sync with prices, and Pacer's quota meter in the sidebar.",
+  "type": "module",
+  "license": "MIT",
+  "author": "floris3456",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/floris3456/opencode-pacer.git"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "cliproxyapi",
+    "pacer",
+    "quota"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/v1/server.ts",
+    "./tui": "./src/tui.tsx",
+    "./core": "./src/core/index.ts",
+    "./rpc": "./src/rpc.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.26"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.35",
+    "@opencode/plugin": "2.0.26",
+    "@opentui/core": "0.5.17",
+    "@opentui/keymap": "0.4.5",
+    "@opentui/solid": "0.5.17",
+    "@types/bun": "^1.4.2",
+    "solid-js": "^1.9.17",
+    "typescript": "^7.0.2"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.4.5",
+    "@opentui/solid": ">=0.4.5",
+    "solid-js": "^1.9"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
+  }
+}
