@@ -4,10 +4,6 @@ export interface Seen {
   method: string
   path: string
   headers: Record<string, string>
-  /** Model requests: the model asked for, the decoded X-Quota-Handoff claim and the reply status. */
-  model?: string
-  claim?: Record<string, unknown>
-  status?: number
 }
 
 export interface FakeOptions {
@@ -15,27 +11,15 @@ export interface FakeOptions {
   pacer?: boolean
   /** X-Pacer-Quota value Pacer adds to declared model replies. */
   quota?: (req: Request) => string | undefined
-  /**
-   * Pacer moving a chat with `compact_on_switch`: lists Claude Haiku too,
-   * acknowledges claimed requests (X-Quota-Binding) and refuses the first
-   * claimed chat step with 409 `quota_compact_required`.
-   */
-  accountSwitch?: boolean
-  /** Refuse the resumed primary request too, to check the recovery loop guard. */
-  refuseAgain?: boolean
 }
-
-const HAIKU = { id: "claude-haiku-5-5", owned_by: "anthropic", display_name: "Claude Haiku 5.5", kind: "chat", providers: ["claude"], context_length: 1000000, max_completion_tokens: 128000, input_modalities: ["text", "image"], reasoning: { mode: "levels", levels: ["low", "high", "max"] } }
 
 export function fakeCPA(opts: FakeOptions) {
   const seen: Seen[] = []
-  let refused = false
   const server = Bun.serve({
     port: 0,
     async fetch(req) {
       const url = new URL(req.url)
-      const entry: Seen = { method: req.method, path: url.pathname + url.search, headers: Object.fromEntries(req.headers) }
-      seen.push(entry)
+      seen.push({ method: req.method, path: url.pathname + url.search, headers: Object.fromEntries(req.headers) })
       const authorised = req.headers.get("authorization") === `Bearer ${opts.key}` || req.headers.get("x-api-key") === opts.key
       if (url.pathname === "/v0/resource/plugins/pacer/events") {
         if (!opts.pacer) return new Response("not found", { status: 404 })
@@ -57,35 +41,13 @@ export function fakeCPA(opts: FakeOptions) {
             { id: "claude-opus-5-5", owned_by: "anthropic", display_name: "Claude Opus 5.5", kind: "chat", providers: ["claude"], context_length: 1000000, max_completion_tokens: 128000, input_modalities: ["text", "image"], reasoning: { mode: "levels", levels: ["low", "high", "max"] } },
             { id: "gpt-6-sol", owned_by: "openai", kind: "chat", providers: ["codex"], context_length: 400000, input_length: 272000, max_completion_tokens: 128000, reasoning: { mode: "levels", levels: ["low", "medium", "high", "xhigh"] }, service_tiers: ["priority"] },
             { id: "gpt-image-2", owned_by: "openai", kind: "image", providers: ["codex"], reasoning: { mode: "none" } },
-            ...(opts.accountSwitch ? [HAIKU] : []),
           ],
         })
       if (url.pathname === "/v1/chat/completions" || url.pathname === "/v1/messages") {
         const quota = req.headers.get("x-pacer-client") ? opts.quota?.(req) : undefined
         const body = req.method === "POST" ? ((await req.json().catch(() => ({}))) as Record<string, unknown>) : {}
-        const raw = req.headers.get("x-quota-handoff")
-        entry.model = typeof body.model === "string" ? body.model : undefined
-        entry.claim = raw ? JSON.parse(Buffer.from(raw, "base64url").toString()) : undefined
-        if (opts.accountSwitch && entry.claim?.kind === "primary" && (!refused || opts.refuseAgain)) {
-          refused = true
-          entry.status = 409
-          return Response.json(
-            { error: { type: "quota_handoff", code: "quota_compact_required", message: "quota_compact_required: the account is used up" } },
-            { status: 409, headers: { "X-Quota-Protocol": "1" } },
-          )
-        }
-        entry.status = 200
-        const output = opts.accountSwitch && body.model === HAIKU.id
-          ? "## Objective\n- Reply with pong.\n\n## Requirements\n- Reply exactly.\n\n## Decisions\n- None.\n\n## Work State\n### Completed\n- Request received.\n### Active\n- Reply pending.\n### Blocked\n- None.\n\n## Next Move\n1. Reply with pong.\n\n## Relevant Files\n- None.\n\n## Important Context\n- This is a test."
-          : "pong"
         const headers = new Headers({ "content-type": body.stream ? "text/event-stream" : "application/json" })
         if (quota) headers.set("X-Pacer-Quota", quota)
-        if (entry.claim) {
-          headers.set("X-Quota-Protocol", "1")
-          headers.set("X-Quota-Binding", Buffer.from(JSON.stringify({ protocol: 1, generation: refused ? 2 : 1, alias: refused ? "B" : "A" })).toString("base64url"))
-        }
-        if (!body.stream && url.pathname === "/v1/messages")
-          return Response.json({ id: "msg_1", type: "message", role: "assistant", model: body.model, content: [{ type: "text", text: output }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }, { headers })
         if (!body.stream)
           return new Response(JSON.stringify({ id: "x", object: "chat.completion", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: "pong" }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 } }), { headers })
         const sse = (data: unknown, event?: string) => (event ? `event: ${event}\n` : "") + `data: ${JSON.stringify(data)}\n\n`
@@ -95,7 +57,7 @@ export function fakeCPA(opts: FakeOptions) {
           text =
             sse({ type: "message_start", message: { id, type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } }, "message_start") +
             sse({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, "content_block_start") +
-            sse({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: output } }, "content_block_delta") +
+            sse({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "pong" } }, "content_block_delta") +
             sse({ type: "content_block_stop", index: 0 }, "content_block_stop") +
             sse({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }, "message_delta") +
             sse({ type: "message_stop" }, "message_stop")
