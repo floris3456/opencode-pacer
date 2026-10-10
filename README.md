@@ -45,6 +45,43 @@ sidebar between this chat's provider and all accounts.
 
 **OpenCodePlus**: in progress.
 
+## Account-switch summaries (OpenCode 2.x)
+
+Claude chat requests ask Pacer for `compact_on_switch`. When Pacer replies with
+`409 quota_compact_required`, the plugin turns that refusal into a context-overflow
+response. OpenCode writes a summary using Claude Haiku, then automatically retries
+with the chat's original model and the new checkpoint. No extra user message is needed.
+Ordinary compaction keeps your configured summary model. A second switch refusal
+after the summary stops with an error instead of summarising repeatedly.
+
+Enabled by default when Pacer is detected. Configure it through plugin options:
+
+```jsonc
+{
+  "plugins": [{
+    "package": "opencode-pacer",
+    "options": {
+      "accountSwitch": true,
+      "compactionModel": "cliproxyapi/claude-haiku-5-5"
+    }
+  }]
+}
+```
+
+Without `compactionModel`, the plugin selects a Claude Haiku model from CPA's
+catalogue, or keeps the normal summary model if none is available. An explicit
+`agents.compaction.model` setting takes precedence over the plugin's temporary
+override in stock v2; leave that unset to use Haiku only for switch summaries. Set
+`accountSwitch: false` to disable handoff claims. Automatic compaction must be
+enabled for automatic recovery; otherwise run `/compact` before retrying.
+
+Stock v2's summary-agent model is location-wide: another chat compacting during
+the brief handoff window may also use Haiku. The override is cleared on the resumed
+request, execution completion/failure/interruption, or after ten minutes.
+Warming (`generate`) requests also carry claims, but refusals fail the ping rather
+than starting compaction. Actual exhausted-account warming behavior still needs
+live verification; successful claim acknowledgements alone do not prove it.
+
 ## Settings you can keep
 
 Anything you write under `provider.cliproxyapi` in `opencode.json` wins over what the plugin syncs: the provider's
@@ -64,10 +101,15 @@ Pacer reads provider quota meters itself (every 30 minutes at most when an accou
 ```sh
 bun install
 bun test
-bunx tsc --noEmit
+bun run typecheck
 ```
 
 `test/hosts/` runs real opencode builds against a fake CPA with Pacer (see the scripts' headers).
+
+```sh
+bun test/hosts/v2-switch.ts /path/to/opencode-v2
+REFUSE_AGAIN=1 bun test/hosts/v2-switch.ts /path/to/opencode-v2
+```
 
 ## License
 
