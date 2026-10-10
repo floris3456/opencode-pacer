@@ -18,12 +18,15 @@
   ],
   "exports": {
     ".": "./src/index.ts",
-    "./server": "./src/v1/server.ts",
+    "./server": "./src/index.ts",
     "./tui": "./src/tui.tsx",
     "./core": "./src/core/index.ts",
     "./rpc": "./src/rpc.ts"
   },
   "files": [
+    "index.ts",
+    "tui.ts",
+    "rpc.ts",
     "src",
     "README.md",
     "LICENSE"

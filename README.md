@@ -29,7 +29,21 @@ switches accounts when Pacer moves its chat.
 Then run `/connect`, choose **CLIProxyAPI**, and enter the URL (for example `https://cpa.example.com/v1`) and your
 CPA API key. The key is only sent to that URL's origin.
 
-**opencode 2.x** (`@opencode/cli`) and **OpenCodePlus**: in progress.
+**opencode 2.x** (`@opencode/cli`): run `opencode plugin add opencode-pacer`, or list the package (or a local checkout)
+under `plugins`. The server half and the sidebar both load from that one entry.
+
+```jsonc
+// ~/.config/opencode/opencode.json
+{ "plugins": ["opencode-pacer"] }
+```
+
+Then run `/connect`, choose **CLIProxyAPI**, and enter the URL and API key as above. The plugin supplies the provider,
+every model with its limits and prices, and sends Claude models through CPA's Anthropic Messages relay, so drop the URL,
+key and models from any `providers.cliproxyapi` you defined by hand. Keep only a `package` there to send the other
+models through another API, for example `"@opencode/ai/providers/openai"` for OpenAI Responses. `/usage` switches the
+sidebar between this chat's provider and all accounts.
+
+**OpenCodePlus**: in progress.
 
 ## Settings you can keep
 

@@ -78,20 +78,27 @@ export async function setup(ctx: Context) {
 
   const stored = await ctx.storage.get("meter").catch(() => undefined)
   if (stored) meter.restore(stored as never)
+  // The last good catalogue per base URL: models are listed from the first
+  // read after a restart and through CPA outages, not after the first fetch.
+  const saved = (await ctx.storage.get("catalogue").catch(() => undefined)) as
+    | { baseURL?: string; catalogue?: Catalogue }
+    | undefined
 
-  // Meter → RPC events plus throttled persistence.
+  // Meter → RPC events plus throttled persistence. RPC output and storage
+  // reject `undefined` members (absent reset times etc.), so send plain JSON.
+  const plain = () => JSON.parse(JSON.stringify(meter.snapshot())) as Record<string, unknown>
   const registration = await ctx.rpc.register(PacerRpc, {
-    snapshot: () => meter.snapshot() as never,
+    snapshot: async () => plain() as never,
   })
   const emit = () => {
-    void registration.events.emit("meter", { snapshot: meter.snapshot() } as never).catch(() => {})
+    void registration.events.emit("meter", { snapshot: plain() } as never).catch(() => {})
   }
   let persistedAt = 0
   const persist = () => {
     const now = Date.now()
     if (now - persistedAt < PERSIST_MS) return
     persistedAt = now
-    void ctx.storage.set("meter", meter.snapshot() as never).catch(() => {})
+    void ctx.storage.set("meter", plain() as never).catch(() => {})
   }
   meter.subscribe(() => {
     emit()
@@ -185,6 +192,13 @@ export async function setup(ctx: Context) {
     }
   }
 
+  await resolveRoute()
+  if (state.route && saved?.catalogue && saved.baseURL === state.route.baseURL) {
+    state.catalogue = saved.catalogue
+    state.catalogueText = JSON.stringify(saved.catalogue)
+    await ctx.provider.reload()
+  }
+
   /** Returns whether the catalogue was reached (failed routes keep the last one). */
   const refresh = async (): Promise<boolean> => {
     await resolveRoute()
@@ -220,6 +234,7 @@ export async function setup(ctx: Context) {
       state.catalogue = catalogue
       state.catalogueText = text
       await ctx.provider.reload()
+      await ctx.storage.set("catalogue", JSON.parse(JSON.stringify({ baseURL: route.baseURL, catalogue }))).catch(() => {})
     }
     return true
   }
