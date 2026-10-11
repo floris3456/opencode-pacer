@@ -7,7 +7,8 @@
 
 import { Plugin } from "@opencode/plugin/tui"
 import type { Context } from "@opencode/plugin/tui/context"
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { parseNextUse, type NextUse } from "../core/protocol.js"
 import { Meter, bar, windowLine, type CredentialState, type MeterSnapshot } from "../core/meter.js"
 import { PacerRpc, type PacerMeterEvent } from "../rpc.js"
 
@@ -30,6 +31,45 @@ function View(props: {
   const timer = setInterval(() => setNow(Date.now()), TICK_MS)
   onCleanup(() => clearInterval(timer))
   const served = createMemo(() => props.snapshot()?.served?.[props.sessionID])
+  const [preview, setPreview] = createSignal<NextUse>()
+  const [active, setActive] = createSignal<{ ids: string[]; expires: number }>()
+  const rpc = props.context.client.rpc(PacerRpc)
+  createEffect(() => {
+    const sessionID = props.sessionID
+    const session = props.context.data.session.get(sessionID)
+    const model = session?.model
+    const directory = session?.location.directory ?? props.context.location?.directory ?? props.context.data.location.default().directory
+    // Changing chat/model/location retires an outstanding result immediately.
+    const selected = model ? `${model.providerID}/${model.id}` : ""
+    props.context.data.session.status(sessionID)
+    setPreview(undefined)
+    setActive(undefined)
+    let disposed = false
+    let loading = false
+    const load = async () => {
+      if (loading) return
+      loading = true
+      const value = await rpc.nextUse({ sessionID }, { location: { directory } }).catch(() => undefined)
+      loading = false
+      if (disposed) return
+      const next = parseNextUse(value)
+      setPreview(next && (!selected || selected.endsWith(`/${next.model}`)) ? next : undefined)
+      const activity = value as { active?: unknown; expires_ms?: unknown } | undefined
+      setActive(Array.isArray(activity?.active) && typeof activity?.expires_ms === "number"
+        ? { ids: activity.active.filter((id): id is string => typeof id === "string"), expires: activity.expires_ms }
+        : undefined)
+      setNow(Date.now())
+    }
+    void load()
+    const poll = setInterval(() => void load(), TICK_MS)
+    onCleanup(() => { disposed = true; clearInterval(poll) })
+  })
+  const nextUse = () => {
+    const value = preview()
+    const last = served()
+    if (value && last && value.auth === last.auth && last.at_ms >= value.at_ms) return undefined
+    return value && value.expires_ms > now() ? value : undefined
+  }
   const rows = createMemo<CredentialState[]>(() => {
     const snapshot = props.snapshot()
     if (!snapshot) return []
@@ -62,6 +102,13 @@ function View(props: {
               </text>
               <Show when={served()?.auth === row.id}>
                 <text fg={theme.text.feedback.info.base}>LAST USED</text>
+              </Show>
+              <Show when={props.context.data.session.status(props.sessionID) === "running" && (active()?.expires ?? 0) > now() && active()?.ids.includes(row.id)}>
+                <text fg={theme.text.feedback.success.base}>IN USE</text>
+              </Show>
+              <Show when={nextUse()?.auth === row.id && nextUse()?.provider === row.provider}>
+                <text fg={theme.text.feedback.info.base}>NEXT USE{nextUse()?.mode === "dry-run" ? " · dry-run" : ""}</text>
+                <text fg={theme.text.muted}>{nextUse()?.forced ? "quota switch" : "cold-cache preference"}</text>
               </Show>
               <Show when={row.shared_with.length > 0}>
                 <text fg={theme.text.muted}>shared quota with {row.shared_with.join(", ")}</text>

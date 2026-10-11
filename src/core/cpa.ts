@@ -72,6 +72,15 @@ export async function usage(fetchFn: Fetch, conn: Connection, timeoutMs = 5000):
   return view
 }
 
+/** A chat capability authorizes its own preview; the CPA API key cannot select another chat. */
+export async function chatUsage(fetchFn: Fetch, baseURL: string, capability: string, route: string, timeoutMs = 5000): Promise<UsageView> {
+  const url = new URL(originOf(baseURL) + EVENTS)
+  url.search = new URLSearchParams({ view: "usage", v: "1", model: route }).toString()
+  const view = parseUsage(await getJSON(fetchFn, url.href, capability, timeoutMs))
+  if (!view) throw new Error("Pacer's chat usage view was not understood")
+  return view
+}
+
 /** Pacer's price for each model this key can use (USD per million tokens). */
 export async function prices(fetchFn: Fetch, conn: Connection, timeoutMs = 10000): Promise<Record<string, Price>> {
   const url = `${originOf(conn.baseURL)}${EVENTS}?view=prices&auth=api-key`

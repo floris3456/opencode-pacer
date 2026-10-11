@@ -134,6 +134,40 @@ export interface UsageCredential {
 export interface UsageView {
   now_ms: number
   credentials: UsageCredential[]
+  next_use?: NextUse
+  active?: string[]
+}
+
+/** A short-lived, per-chat routing preview computed by Pacer, never a client prediction. */
+export interface NextUse {
+  v: 1
+  at_ms: number
+  expires_ms: number
+  candidates_at_ms?: number
+  mode: "off" | "dry-run" | "active"
+  provider: string
+  model: string
+  reason: string
+  auth?: string
+  alias?: string
+  forced: boolean
+}
+
+export function parseNextUse(raw: unknown): NextUse | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const value = raw as Record<string, unknown>
+  const at = num(value.at_ms)
+  const expires = num(value.expires_ms)
+  const provider = str(value.provider)
+  const model = str(value.model)
+  const reason = str(value.reason)
+  const mode = value.mode
+  if (value.v !== 1 || !at || !expires || expires <= at || !provider || !model || !reason) return undefined
+  if (mode !== "off" && mode !== "dry-run" && mode !== "active") return undefined
+  if (typeof value.forced !== "boolean") return undefined
+  const auth = str(value.auth)
+  if (auth && (mode === "off" || (reason !== "cold_move" && reason !== "forced_move"))) return undefined
+  return { v: 1, at_ms: at, expires_ms: expires, candidates_at_ms: num(value.candidates_at_ms), mode, provider, model, reason, auth, alias: str(value.alias), forced: value.forced }
 }
 
 export function parseUsage(raw: unknown): UsageView | undefined {
@@ -156,7 +190,7 @@ export function parseUsage(raw: unknown): UsageView | undefined {
       windows: c.windows.map(parseWindow).filter((w): w is QuotaWindow => !!w),
     })
   }
-  return { now_ms: now ? now * 1000 : Date.now(), credentials }
+  return { now_ms: now ? now * 1000 : Date.now(), credentials, next_use: parseNextUse(d.next_use), active: Array.isArray(d.active) ? d.active.filter((id): id is string => typeof id === "string") : undefined }
 }
 
 /** A model's price: USD per million tokens, as Pacer values usage. */

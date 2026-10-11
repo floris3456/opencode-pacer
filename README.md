@@ -82,6 +82,29 @@ Warming (`generate`) requests also carry claims, but refusals fail the ping rath
 than starting compaction. Actual exhausted-account warming behavior still needs
 live verification; successful claim acknowledgements alone do not prove it.
 
+## Next credential and live meters (OpenCode 2.x)
+
+With a Pacer server that exposes per-chat routing previews, the sidebar shows
+**NEXT USE** on Pacer's proposed replacement, separately from **LAST USED**.
+**IN USE** marks credentials Pacer reports as actively serving this chat. It clears
+when the chat becomes idle or the activity reading expires; activity is refreshed
+alongside the preview, without an additional polling request.
+`dry-run` is labelled explicitly: it is Pacer's preference, not a guarantee of
+which credential CPA will actually select. Economic moves appear only after cache
+protection expires; forced quota switches can appear sooner. The preview uses
+the last request's eligible candidates and current server-side quota/cache evidence.
+
+The visible sidebar refreshes the preview every 15 seconds. Stale or failed reads
+clear it; old servers simply show no marker. A chat needs a primary request with
+the updated plugin/server first. Preview reads use its private capability, never
+expose that capability in the UI, and do not trigger a switch or provider quota call.
+
+Percentages update immediately from each response's `X-Pacer-Quota`, including
+known aliases sharing that quota. This is one header decode and an in-memory update,
+with UI events pushed immediately and disk persistence throttled. There is no extra
+network request per inference response and no per-token processing. Summary/title
+responses refresh percentages without replacing the primary chat's LAST USED marker.
+
 ## Settings you can keep
 
 Anything you write under `provider.cliproxyapi` in `opencode.json` wins over what the plugin syncs: the provider's

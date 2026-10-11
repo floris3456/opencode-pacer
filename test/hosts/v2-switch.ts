@@ -15,12 +15,17 @@ const [bin] = process.argv.slice(2)
 if (!bin) throw new Error("usage: v2-switch.ts <opencode>")
 const KEY = "sk-host-test-0123456789"
 const refuseAgain = process.env.REFUSE_AGAIN === "1"
-const cpa = fakeCPA({ key: KEY, pacer: true, accountSwitch: true, refuseAgain })
+const sessionID = `ses_pacerpreview${Math.random().toString(16).slice(2)}`
+const cpa = fakeCPA({ key: KEY, pacer: true, accountSwitch: true, refuseAgain,
+  nextUse: () => ({ v: 1, at_ms: Date.now(), expires_ms: Date.now() + 30000, mode: "dry-run", provider: "claude", model: "claude-opus-5-5", reason: "cold_move", auth: "claude-next.json", alias: "Next", forced: false }),
+  quota: (req) => Buffer.from(JSON.stringify({ v: 1, at_ms: Date.now(), provider: "claude", auth: req.headers.get("x-quota-handoff") ? "claude-a.json" : "claude-aux.json", windows: [{ scope: "all", seconds: 18000, left: 37.5, state: "current", applies: true }] })).toString("base64url"),
+})
 
 const home = await fs.mkdtemp(path.join(os.tmpdir(), "oc-v2-switch-"))
 const env: Record<string, string> = {
   ...(process.env as Record<string, string>),
   HOME: home,
+  PWD: home,
   XDG_CONFIG_HOME: path.join(home, "config"),
   XDG_DATA_HOME: path.join(home, "data"),
   XDG_CACHE_HOME: path.join(home, "cache"),
@@ -55,12 +60,14 @@ for (let i = 0; i < 20 && connected.code !== 0; i++) {
 checks.connected = connected.code === 0
 
 const before = await run(["api", "agent.get", "--param", "agentID=compaction"])
-const result = await run(["run", "-m", "cliproxyapi/claude-opus-5-5", "--format", "json", "Reply with exactly: pong"])
+const result = await run(["run", "-s", sessionID, "-m", "cliproxyapi/claude-opus-5-5", "--format", "json", "Reply with exactly: pong"])
 const events = result.out
   .split("\n")
   .filter((line) => line.startsWith("{"))
   .map((line) => JSON.parse(line) as { type: string; part?: { text?: string }; error?: { message?: string } })
 const agent = await run(["api", "agent.get", "--param", "agentID=compaction"])
+const meter = await run(["api", "rpc.call", "--param", "rpcID=opencode-pacer", "--param", "method=snapshot", "-d", '{"input":{}}'])
+const next = await run(["api", "rpc.call", "--param", "rpcID=opencode-pacer", "--param", "method=nextUse", "-d", JSON.stringify({ input: { sessionID } })])
 await run(["service", "stop"])
 cpa.stop()
 
@@ -87,6 +94,13 @@ const restored = (() => {
   }
 })()
 checks.summary_agent_restored = agent.code === 0 && restored
+if (!refuseAgain) {
+  const snapshot = JSON.parse(meter.out).output
+  const preview = JSON.parse(next.out).output
+  checks.live_response_percentage = snapshot?.credentials?.find((row: { id: string }) => row.id === "claude-a.json")?.windows?.[0]?.left === 37.5
+  checks.last_used_primary = snapshot?.served?.[sessionID]?.auth === "claude-a.json"
+  checks.server_preview = preview?.auth === "claude-next.json" && preview?.mode === "dry-run"
+}
 
 const ok = Object.values(checks).every(Boolean)
 console.log(
@@ -97,6 +111,8 @@ console.log(
       requests: models.map((s) => `${s.status} ${s.model}${s.claim ? ` [${s.claim.kind} checkpoint=${s.claim.checkpoint || "-"}]` : ""}`),
       events: events.map((e) => e.type + (e.error?.message ? `: ${e.error.message}` : "")),
       compaction_agent: agent.out.slice(0, 400),
+      meter: ok ? undefined : meter.out,
+      declarations: ok ? undefined : models.map((s) => s.headers["x-pacer-client"]),
       stderr_tail: ok ? undefined : (connected.err + result.err).slice(-3000),
     },
     null,

@@ -56,6 +56,13 @@ export class Meter {
         at_ms: reply.at_ms,
       })
     }
+    // Aliases with a shared quota are the same meter. A live response updates
+    // their known rows too; no extra read or provider request is needed.
+    for (const id of old?.shared_with ?? []) {
+      const shared = this.creds.get(id)
+      if (shared && shared.provider === reply.provider && shared.at_ms <= reply.at_ms)
+        this.creds.set(id, { ...shared, windows: reply.windows, at_ms: reply.at_ms })
+    }
     if (session) {
       const last = this.served.get(session)
       if (!last || last.at_ms <= reply.at_ms) this.served.set(session, { auth: reply.auth, at_ms: reply.at_ms })

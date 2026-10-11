@@ -21,6 +21,7 @@ import type { Context } from "@opencode/plugin/promise/plugin"
 import type { ProviderEditor } from "@opencode/plugin/promise/provider"
 import type { SessionHttpRequest, SessionHttpResponse, SessionModelRequest } from "@opencode/plugin/promise/session"
 import {
+  chatUsage,
   discover,
   models as fetchModels,
   normaliseBaseURL,
@@ -94,6 +95,7 @@ export async function setup(ctx: Context) {
   console.error(`opencode-pacer v2 loaded in OpenCode ${ctx.app.version}`)
   const meter = new Meter()
   const state: State = { pacer: false, views: [], discoveryAt: 0 }
+  const recordedRoutes = new Map<string, string>()
 
   const stored = await ctx.storage.get("meter").catch(() => undefined)
   if (stored) meter.restore(stored as never)
@@ -110,20 +112,36 @@ export async function setup(ctx: Context) {
   const plain = () => JSON.parse(JSON.stringify(meter.snapshot())) as Record<string, unknown>
   const registration = await ctx.rpc.register(PacerRpc, {
     snapshot: async () => plain() as never,
+    nextUse: async (input) => {
+      const sessionID = (input as { sessionID: string }).sessionID
+      const route = state.route
+      if (!route || !state.pacer) return {}
+      const session = await ctx.session.get({ sessionID })
+      const last = await ctx.storage.get(`session-route/${sessionID}`) as { providerID: string; id: string; baseURL: string } | undefined
+      const model = session.model ?? last
+      if (!model || model.providerID !== PROVIDER_ID || !last || last.baseURL !== route.baseURL) return {}
+      const routeID = `${model.providerID}/${model.id}`
+      const stored = await ctx.storage.get(`binding/${sessionID}/${routeID}`) as Binding | undefined
+      if (!stored?.capability) return {}
+      const view = await chatUsage(fetch, route.baseURL, stored.capability, routeID, TIMEOUT_MS)
+      meter.applyView(view)
+      return JSON.parse(JSON.stringify({ expires_ms: Date.now() + 30_000, ...view.next_use, active: view.active ?? [] }))
+    },
   })
-  const emit = () => {
-    void registration.events.emit("meter", { snapshot: plain() } as never).catch(() => {})
+  const emit = (snapshot: Record<string, unknown>) => {
+    void registration.events.emit("meter", { snapshot } as never).catch(() => {})
   }
   let persistedAt = 0
-  const persist = () => {
+  const persist = (snapshot: Record<string, unknown>) => {
     const now = Date.now()
     if (now - persistedAt < PERSIST_MS) return
     persistedAt = now
-    void ctx.storage.set("meter", plain() as never).catch(() => {})
+    void ctx.storage.set("meter", snapshot as never).catch(() => {})
   }
   meter.subscribe(() => {
-    emit()
-    persist()
+    const snapshot = plain()
+    emit(snapshot)
+    persist(snapshot)
   })
 
   // ---- /connect: the CLIProxyAPI integration.
@@ -260,6 +278,10 @@ export async function setup(ctx: Context) {
       }
       const routeID = `${event.model.providerID}/${event.model.id}`
       const binding = await bindingFor(event.sessionID, routeID)
+      if (event.kind === "primary" && recordedRoutes.get(event.sessionID) !== `${route.baseURL}/${routeID}`) {
+        await ctx.storage.set(`session-route/${event.sessionID}`, { providerID: event.model.providerID, id: event.model.id, baseURL: route.baseURL })
+        recordedRoutes.set(event.sessionID, `${route.baseURL}/${routeID}`)
+      }
       const headers = new Headers(event.request.headers)
       headers.set(
         CLAIM_HEADER,
@@ -276,7 +298,7 @@ export async function setup(ctx: Context) {
       const route = state.route
       if (!route || originOfURL(event.request.url) !== route.origin) return
       const reply = decodeQuota(event.response.headers.get(QUOTA_HEADER))
-      if (reply) meter.applyReply(reply, event.sessionID)
+      if (reply) meter.applyReply(reply, event.kind === "primary" ? event.sessionID : undefined)
 
       const claimed = claims.get(event.request)
       if (!claimed) return

@@ -1,4 +1,5 @@
 // A fake CLIProxyAPI with (optionally) Pacer, for tests. Records every request.
+import { createHash } from "node:crypto"
 
 export interface Seen {
   method: string
@@ -23,6 +24,7 @@ export interface FakeOptions {
   accountSwitch?: boolean
   /** Refuse the resumed primary request too, to check the recovery loop guard. */
   refuseAgain?: boolean
+  nextUse?: () => unknown
 }
 
 const HAIKU = { id: "claude-haiku-5-5", owned_by: "anthropic", display_name: "Claude Haiku 5.5", kind: "chat", providers: ["claude"], context_length: 1000000, max_completion_tokens: 128000, input_modalities: ["text", "image"], reasoning: { mode: "levels", levels: ["low", "high", "max"] } }
@@ -30,6 +32,7 @@ const HAIKU = { id: "claude-haiku-5-5", owned_by: "anthropic", display_name: "Cl
 export function fakeCPA(opts: FakeOptions) {
   const seen: Seen[] = []
   let refused = false
+  const claims = new Map<string, string>()
   const server = Bun.serve({
     port: 0,
     async fetch(req) {
@@ -41,11 +44,13 @@ export function fakeCPA(opts: FakeOptions) {
         if (!opts.pacer) return new Response("not found", { status: 404 })
         if (!req.headers.get("authorization"))
           return Response.json({ protocol: 1, mode: "off", pacer: true, client: { version: 1, request_header: "X-Pacer-Client", caps: ["quota"], quota_header: "X-Pacer-Quota", views: ["usage", "prices"] } })
-        if (!authorised) return Response.json({ error: "unauthorized" }, { status: 401 })
+        const token = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? ""
+        const claimed = claims.get(createHash("sha256").update(token).digest("hex")) === url.searchParams.get("model")
+        if (!authorised && !claimed) return Response.json({ error: "unauthorized" }, { status: 401 })
         if (url.searchParams.get("view") === "prices")
           return Response.json({ protocol: 1, view: "prices", unit: "usd_per_million_tokens", revision: 1, models: { "claude-opus-5-5": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25, source: "imported" }, "gpt-6-sol": { input: 2, output: 8, source: "manual" } } })
         if (url.searchParams.get("view") === "usage")
-          return Response.json({ protocol: 1, view: "usage", now: Math.floor(Date.now() / 1000), credentials: [{ id: "claude-a.json", alias: "A", provider: "claude", shared_with: [], windows: [{ scope: "all", seconds: 18000, left: 70, reset_ms: Date.now() + 3_600_000, state: "current", applies: true }] }] })
+          return Response.json({ protocol: 1, view: "usage", now: Math.floor(Date.now() / 1000), ...(claimed ? { next_use: opts.nextUse?.() } : {}), credentials: [{ id: "claude-a.json", alias: "A", provider: "claude", shared_with: [], windows: [{ scope: "all", seconds: 18000, left: 70, reset_ms: Date.now() + 3_600_000, state: "current", applies: true }] }] })
         return Response.json({ error: "bad" }, { status: 400 })
       }
       if (!authorised) return Response.json({ error: "unauthorized" }, { status: 401 })
@@ -66,6 +71,7 @@ export function fakeCPA(opts: FakeOptions) {
         const raw = req.headers.get("x-quota-handoff")
         entry.model = typeof body.model === "string" ? body.model : undefined
         entry.claim = raw ? JSON.parse(Buffer.from(raw, "base64url").toString()) : undefined
+        if (typeof entry.claim?.capability === "string" && typeof entry.claim.route === "string") claims.set(entry.claim.capability, entry.claim.route)
         if (opts.accountSwitch && entry.claim?.kind === "primary" && (!refused || opts.refuseAgain)) {
           refused = true
           entry.status = 409
