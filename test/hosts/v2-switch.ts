@@ -17,6 +17,7 @@ const KEY = "sk-host-test-0123456789"
 const refuseAgain = process.env.REFUSE_AGAIN === "1"
 const sessionID = `ses_pacerpreview${Math.random().toString(16).slice(2)}`
 const cpa = fakeCPA({ key: KEY, pacer: true, accountSwitch: true, refuseAgain,
+  primaryStreamDelayMs: 3000,
   nextUse: () => ({ v: 1, at_ms: Date.now(), expires_ms: Date.now() + 30000, mode: "dry-run", provider: "claude", model: "claude-opus-5-5", reason: "cold_move", auth: "claude-next.json", alias: "Next", forced: false }),
   quota: (req) => Buffer.from(JSON.stringify({ v: 1, at_ms: Date.now(), provider: "claude", auth: req.headers.get("x-quota-handoff") ? "claude-a.json" : "claude-aux.json", windows: [{ scope: "all", seconds: 18000, left: 37.5, state: "current", applies: true }] })).toString("base64url"),
 })
@@ -60,7 +61,22 @@ for (let i = 0; i < 20 && connected.code !== 0; i++) {
 checks.connected = connected.code === 0
 
 const before = await run(["api", "agent.get", "--param", "agentID=compaction"])
-const result = await run(["run", "-s", sessionID, "-m", "cliproxyapi/claude-opus-5-5", "--format", "json", "Reply with exactly: pong"])
+let finished = false
+const pending = run(["run", "-s", sessionID, "-m", "cliproxyapi/claude-opus-5-5", "--format", "json", "Reply with exactly: pong"]).finally(() => { finished = true })
+if (!refuseAgain) {
+  checks.in_use_during_stream = false
+  while (!finished) {
+    if (cpa.seen.some((request) => request.claim?.kind === "primary" && request.status === 200)) {
+      const live = await run(["api", "rpc.call", "--param", "rpcID=opencode-pacer", "--param", "method=snapshot", "-d", '{"input":{}}'])
+      if (live.code === 0 && JSON.parse(live.out).output?.activity?.[sessionID]?.auth === "claude-a.json") {
+        checks.in_use_during_stream = true
+        break
+      }
+    }
+    await Bun.sleep(100)
+  }
+}
+const result = await pending
 const events = result.out
   .split("\n")
   .filter((line) => line.startsWith("{"))
@@ -99,6 +115,7 @@ if (!refuseAgain) {
   const preview = JSON.parse(next.out).output
   checks.live_response_percentage = snapshot?.credentials?.find((row: { id: string }) => row.id === "claude-a.json")?.windows?.[0]?.left === 37.5
   checks.last_used_primary = snapshot?.served?.[sessionID]?.auth === "claude-a.json"
+  checks.in_use_cleared_after_turn = snapshot?.activity?.[sessionID] !== undefined && snapshot.activity[sessionID].auth === undefined
   checks.server_preview = preview?.auth === "claude-next.json" && preview?.mode === "dry-run"
 }
 

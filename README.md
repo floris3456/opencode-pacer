@@ -86,9 +86,9 @@ live verification; successful claim acknowledgements alone do not prove it.
 
 With a Pacer server that exposes per-chat routing previews, the sidebar shows
 **NEXT USE** on Pacer's proposed replacement, separately from **LAST USED**.
-**IN USE** marks credentials Pacer reports as actively serving this chat. It clears
-when the chat becomes idle or the activity reading expires; activity is refreshed
-alongside the preview, without an additional polling request.
+**IN USE** marks the credential serving the current turn, immediately from the
+primary response header. It clears when the turn ends. Pacer's activity poll also
+covers requests awaiting response headers, without an additional polling request.
 `dry-run` is labelled explicitly: it is Pacer's preference, not a guarantee of
 which credential CPA will actually select. Economic moves appear only after cache
 protection expires; forced quota switches can appear sooner. The preview uses

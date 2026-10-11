@@ -103,7 +103,7 @@ function View(props: {
               <Show when={served()?.auth === row.id}>
                 <text fg={theme.text.feedback.info.base}>LAST USED</text>
               </Show>
-              <Show when={props.context.data.session.status(props.sessionID) === "running" && (active()?.expires ?? 0) > now() && active()?.ids.includes(row.id)}>
+              <Show when={props.context.data.session.status(props.sessionID) === "running" && (props.snapshot()?.activity?.[props.sessionID]?.auth === row.id || ((active()?.expires ?? 0) > now() && active()?.ids.includes(row.id)))}>
                 <text fg={theme.text.feedback.success.base}>IN USE</text>
               </Show>
               <Show when={nextUse()?.auth === row.id && nextUse()?.provider === row.provider}>
@@ -152,7 +152,7 @@ export function setup(context: Context) {
   const meter = new Meter()
   meter.subscribe(() => setSnapshot(meter.snapshot()))
   const apply = (value: unknown) => {
-    if (value && typeof value === "object") meter.restore(value as MeterSnapshot)
+    if (value && typeof value === "object") meter.restore(value as MeterSnapshot, true)
   }
   const off = rpc.events.on("meter", (event) =>
     apply((event.data as unknown as PacerMeterEvent | undefined)?.snapshot),

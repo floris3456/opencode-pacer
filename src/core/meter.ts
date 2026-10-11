@@ -23,11 +23,13 @@ export interface MeterSnapshot {
   v: 1
   credentials: CredentialState[]
   served: Record<string, Served>
+  activity?: Record<string, { auth?: string; at_ms: number }>
 }
 
 export class Meter {
   private creds = new Map<string, CredentialState>()
   private served = new Map<string, Served>()
+  private activity = new Map<string, { auth?: string; at_ms: number }>()
   private listeners = new Set<() => void>()
 
   /** Pacer's view of every account. A newer reply for an account is kept. */
@@ -44,7 +46,7 @@ export class Meter {
   }
 
   /** The quota a reply carried; `session` marks which account served that chat. */
-  applyReply(reply: QuotaReply, session?: string): void {
+  applyReply(reply: QuotaReply, session?: string, inUse = false): void {
     const old = this.creds.get(reply.auth)
     if (!old || old.at_ms <= reply.at_ms) {
       this.creds.set(reply.auth, {
@@ -66,8 +68,21 @@ export class Meter {
     if (session) {
       const last = this.served.get(session)
       if (!last || last.at_ms <= reply.at_ms) this.served.set(session, { auth: reply.auth, at_ms: reply.at_ms })
+      if (inUse) this.activity.set(session, { auth: reply.auth, at_ms: this.activityTime(session) })
     }
     this.notify()
+  }
+
+  /** A completed turn clears IN USE without erasing LAST USED. Keep a tombstone
+   * so an older location snapshot cannot resurrect the activity. */
+  endActivity(session: string): void {
+    if (!this.activity.get(session)?.auth) return
+    this.activity.set(session, { at_ms: this.activityTime(session) })
+    this.notify()
+  }
+
+  private activityTime(session: string): number {
+    return Math.max(Date.now(), (this.activity.get(session)?.at_ms ?? 0) + 1)
   }
 
   rows(filter?: { provider?: string }): CredentialState[] {
@@ -86,11 +101,11 @@ export class Meter {
   }
 
   snapshot(): MeterSnapshot {
-    return { v: 1, credentials: [...this.creds.values()], served: Object.fromEntries(this.served) }
+    return { v: 1, credentials: [...this.creds.values()], served: Object.fromEntries(this.served), activity: Object.fromEntries(this.activity) }
   }
 
   /** Merges a snapshot written by another process (newer data wins). */
-  restore(s: MeterSnapshot): void {
+  restore(s: MeterSnapshot, live = false): void {
     if (!s || s.v !== 1 || !Array.isArray(s.credentials)) return
     for (const c of s.credentials) {
       const old = this.creds.get(c.id)
@@ -99,6 +114,12 @@ export class Meter {
     for (const [session, value] of Object.entries(s.served ?? {})) {
       const old = this.served.get(session)
       if (!old || old.at_ms < value.at_ms) this.served.set(session, value)
+    }
+    // Persisted snapshots restore quota/last-used only; activity belongs to the
+    // current server process. The TUI opts into merging live RPC activity.
+    if (live) for (const [session, value] of Object.entries(s.activity ?? {})) {
+      const old = this.activity.get(session)
+      if (!old || old.at_ms < value.at_ms) this.activity.set(session, value)
     }
     this.notify()
   }

@@ -298,7 +298,7 @@ export async function setup(ctx: Context) {
       const route = state.route
       if (!route || originOfURL(event.request.url) !== route.origin) return
       const reply = decodeQuota(event.response.headers.get(QUOTA_HEADER))
-      if (reply) meter.applyReply(reply, event.kind === "primary" ? event.sessionID : undefined)
+      if (reply) meter.applyReply(reply, event.kind === "primary" ? event.sessionID : undefined, event.kind === "primary")
 
       const claimed = claims.get(event.request)
       if (!claimed) return
@@ -443,7 +443,10 @@ export async function setup(ctx: Context) {
         // A run that ended without CPA admitting the chat (summary failed, cancelled, refused again).
         if (type === "session.execution.succeeded" || type === "session.execution.failed" || type === "session.execution.interrupted") {
           const session = (event as { data?: { sessionID?: unknown } }).data?.sessionID
-          if (typeof session === "string") await endSwitch(session)
+          if (typeof session === "string") {
+            meter.endActivity(session)
+            await endSwitch(session)
+          }
           continue
         }
         if (type !== "credential.switched") continue

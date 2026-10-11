@@ -25,6 +25,7 @@ export interface FakeOptions {
   /** Refuse the resumed primary request too, to check the recovery loop guard. */
   refuseAgain?: boolean
   nextUse?: () => unknown
+  primaryStreamDelayMs?: number
 }
 
 const HAIKU = { id: "claude-haiku-5-5", owned_by: "anthropic", display_name: "Claude Haiku 5.5", kind: "chat", providers: ["claude"], context_length: 1000000, max_completion_tokens: 128000, input_modalities: ["text", "image"], reasoning: { mode: "levels", levels: ["low", "high", "max"] } }
@@ -108,6 +109,18 @@ export function fakeCPA(opts: FakeOptions) {
         } else {
           const chunk = (delta: unknown, finish: string | null, usage?: unknown) => sse({ id: "c1", object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })
           text = chunk({ role: "assistant", content: "pong" }, null) + chunk({}, "stop", { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 }) + "data: [DONE]\n\n"
+        }
+        if (opts.primaryStreamDelayMs && entry.claim?.kind === "primary") {
+          const split = text.indexOf("\n\n") + 2
+          return new Response(new ReadableStream({
+            async start(controller) {
+              const encoder = new TextEncoder()
+              controller.enqueue(encoder.encode(text.slice(0, split)))
+              await Bun.sleep(opts.primaryStreamDelayMs!)
+              controller.enqueue(encoder.encode(text.slice(split)))
+              controller.close()
+            },
+          }), { headers })
         }
         return new Response(text, { headers })
       }

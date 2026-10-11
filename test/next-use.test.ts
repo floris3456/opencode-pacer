@@ -9,6 +9,26 @@ const preview = {
   auth: "b", alias: "Next", reason: "cold_move", forced: false,
 } as const
 
+test("IN USE is pushed with response percentages and cleared at turn end without stale resurrection", () => {
+  const server = new Meter()
+  const ui = new Meter()
+  server.subscribe(() => ui.restore(server.snapshot(), true))
+  server.applyReply({ v: 1, auth: "a", provider: "claude", at_ms: 2000, windows: [] }, "chat", true)
+  expect(ui.snapshot().activity?.chat?.auth).toBe("a")
+  const active = server.snapshot()
+  // Auxiliary replies cannot change the current turn's serving credential.
+  server.applyReply({ v: 1, auth: "b", provider: "claude", at_ms: 3000, windows: [] })
+  expect(ui.snapshot().activity?.chat?.auth).toBe("a")
+  server.endActivity("chat")
+  expect(ui.snapshot().activity?.chat?.auth).toBeUndefined()
+  expect(ui.lastServed("chat")?.auth).toBe("a")
+  ui.restore(active, true)
+  expect(ui.snapshot().activity?.chat?.auth).toBeUndefined()
+  const restarted = new Meter()
+  restarted.restore(active)
+  expect(restarted.snapshot().activity?.chat?.auth).toBeUndefined()
+})
+
 test("preview is server-owned, optional and distinct from the last serving account", () => {
   expect(parseNextUse(preview)).toEqual(preview)
   expect(parseNextUse({ ...preview, mode: "off" })).toBeUndefined()
