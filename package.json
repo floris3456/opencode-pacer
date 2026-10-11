@@ -19,6 +19,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./server": "./src/index.ts",
+    "./v2/server": "./src/v2/server.ts",
     "./tui": "./src/tui.tsx",
     "./core": "./src/core/index.ts",
     "./rpc": "./src/rpc.ts"
