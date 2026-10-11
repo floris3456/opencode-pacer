@@ -112,6 +112,13 @@ export async function setup(ctx: Context) {
   const plain = () => JSON.parse(JSON.stringify(meter.snapshot())) as Record<string, unknown>
   const registration = await ctx.rpc.register(PacerRpc, {
     snapshot: async () => plain() as never,
+    usage: async (input) => {
+      const selected = input as { providerID: string; modelID: string }
+      const providers = selected.providerID === PROVIDER_ID
+        ? state.catalogue?.models.find((model) => model.id === selected.modelID)?.providers ?? []
+        : []
+      return { snapshot: plain(), providers }
+    },
     nextUse: async (input) => {
       const sessionID = (input as { sessionID: string }).sessionID
       const route = state.route
@@ -125,7 +132,7 @@ export async function setup(ctx: Context) {
       if (!stored?.capability) return {}
       const view = await chatUsage(fetch, route.baseURL, stored.capability, routeID, TIMEOUT_MS)
       meter.applyView(view)
-      return JSON.parse(JSON.stringify({ expires_ms: Date.now() + 30_000, ...view.next_use, active: view.active ?? [] }))
+      return JSON.parse(JSON.stringify({ model: model.id, expires_ms: Date.now() + 30_000, ...view.next_use, active: view.active ?? [] }))
     },
   })
   const emit = (snapshot: Record<string, unknown>) => {

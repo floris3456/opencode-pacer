@@ -84,6 +84,8 @@ const events = result.out
 const agent = await run(["api", "agent.get", "--param", "agentID=compaction"])
 const meter = await run(["api", "rpc.call", "--param", "rpcID=opencode-pacer", "--param", "method=snapshot", "-d", '{"input":{}}'])
 const next = await run(["api", "rpc.call", "--param", "rpcID=opencode-pacer", "--param", "method=nextUse", "-d", JSON.stringify({ input: { sessionID } })])
+const selected = await run(["api", "rpc.call", "--param", "rpcID=opencode-pacer", "--param", "method=usage", "-d", JSON.stringify({ input: { providerID: "cliproxyapi", modelID: "claude-opus-5-5" } })])
+checks.catalogue_provider_scope = selected.code === 0 && JSON.parse(selected.out).output?.providers?.includes("claude")
 await run(["service", "stop"])
 cpa.stop()
 

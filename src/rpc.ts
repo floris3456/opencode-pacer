@@ -14,6 +14,11 @@ export interface PacerMeterEvent {
 export const PacerRpc = Rpc.define({
   id: "opencode-pacer",
   methods: {
+    /** Cached meter plus the catalogue's providers for the selected prompt model. */
+    usage: {
+      input: { type: "object", properties: { providerID: { type: "string" }, modelID: { type: "string" } }, required: ["providerID", "modelID"], additionalProperties: false },
+      output: { type: "object", additionalProperties: true },
+    },
     /** Read-only preview for one chat; credentials and capabilities remain server-side. */
     nextUse: {
       input: { type: "object", properties: { sessionID: { type: "string" } }, required: ["sessionID"], additionalProperties: false },

@@ -40,8 +40,8 @@ under `plugins`. The server half and the sidebar both load from that one entry.
 Then run `/connect`, choose **CLIProxyAPI**, and enter the URL and API key as above. The plugin supplies the provider,
 every model with its limits and prices, and sends Claude models through CPA's Anthropic Messages relay, so drop the URL,
 key and models from any `providers.cliproxyapi` you defined by hand. Keep only a `package` there to send the other
-models through another API, for example `"@opencode/ai/providers/openai"` for OpenAI Responses. `/usage` switches the
-sidebar between this chat's provider and all accounts.
+models through another API, for example `"@opencode/ai/providers/openai"` for OpenAI Responses. `/usage` opens the
+credential usage popup; the sidebar stays scoped to the selected model's providers.
 
 **OpenCodePlus**: in progress.
 
@@ -83,6 +83,12 @@ than starting compaction. Actual exhausted-account warming behavior still needs
 live verification; successful claim acknowledgements alone do not prove it.
 
 ## Next credential and live meters (OpenCode 2.x)
+
+The sidebar and `/usage` dialog use OpenCodePlus 1.3.5's compact credential-meter
+layout. Sidebar credentials follow the selected prompt model's catalogue providers,
+including before its first request. `/usage` opens the selected-model view;
+`/usage --all` opens all credentials. In the popup, **a** switches scope, **d**
+toggles details, **←/→** page, and **Esc** closes. Popup scope never widens the sidebar.
 
 With a Pacer server that exposes per-chat routing previews, the sidebar shows
 **NEXT USE** on Pacer's proposed replacement, separately from **LAST USED**.
