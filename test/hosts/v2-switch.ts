@@ -17,6 +17,7 @@ const KEY = "sk-host-test-0123456789"
 const refuseAgain = process.env.REFUSE_AGAIN === "1"
 const sessionID = `ses_pacerpreview${Math.random().toString(16).slice(2)}`
 const cpa = fakeCPA({ key: KEY, pacer: true, accountSwitch: true, refuseAgain,
+  usageWatch: true,
   primaryStreamDelayMs: 3000,
   nextUse: () => ({ v: 1, at_ms: Date.now(), expires_ms: Date.now() + 30000, mode: "dry-run", provider: "claude", model: "claude-opus-5-5", reason: "cold_move", auth: "claude-next.json", alias: "Next", forced: false }),
   quota: (req) => Buffer.from(JSON.stringify({ v: 1, at_ms: Date.now(), provider: "claude", auth: req.headers.get("x-quota-handoff") ? "claude-a.json" : "claude-aux.json", windows: [{ scope: "all", seconds: 18000, left: 37.5, state: "current", applies: true }] })).toString("base64url"),
@@ -59,6 +60,26 @@ for (let i = 0; i < 20 && connected.code !== 0; i++) {
   connected = await run(["api", "integration.connect.key", "--param", "integrationID=cliproxyapi", "-d", connect])
 }
 checks.connected = connected.code === 0
+
+// Before this OpenCode instance makes any inference, another caller changes the
+// shared allowance. The real server plugin must relay it to the idle RPC reader.
+const idleSnapshot = () => run(["api", "rpc.call", "--param", "rpcID=opencode-pacer", "--param", "method=snapshot", "-d", '{"input":{}}'])
+for (let i = 0; i < 20; i++) {
+  if (cpa.seen.some((r) => r.path.includes("cursor="))) break
+  await idleSnapshot()
+  await Bun.sleep(100)
+}
+const inferenceBefore = cpa.seen.filter((r) => r.model).length
+cpa.updateQuota(43)
+for (let i = 0; i < 20; i++) {
+  const reading = await idleSnapshot()
+  if (reading.code === 0 && JSON.parse(reading.out).output?.credentials?.find((c: { id: string }) => c.id === "claude-a.json")?.windows?.[0]?.left === 43) {
+    checks.idle_cross_user_update = cpa.seen.filter((r) => r.model).length === inferenceBefore
+    break
+  }
+  await Bun.sleep(100)
+}
+checks.idle_cross_user_update ??= false
 
 const before = await run(["api", "agent.get", "--param", "agentID=compaction"])
 let finished = false

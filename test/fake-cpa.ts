@@ -26,6 +26,7 @@ export interface FakeOptions {
   refuseAgain?: boolean
   nextUse?: () => unknown
   primaryStreamDelayMs?: number
+  usageWatch?: boolean
 }
 
 const HAIKU = { id: "claude-haiku-5-5", owned_by: "anthropic", display_name: "Claude Haiku 5.5", kind: "chat", providers: ["claude"], context_length: 1000000, max_completion_tokens: 128000, input_modalities: ["text", "image"], reasoning: { mode: "levels", levels: ["low", "high", "max"] } }
@@ -34,6 +35,14 @@ export function fakeCPA(opts: FakeOptions) {
   const seen: Seen[] = []
   let refused = false
   const claims = new Map<string, string>()
+  let revision = 1
+  const waiting = new Set<() => void>()
+  const credentials = new Map<string, any>([["claude-a.json", { id: "claude-a.json", alias: "A", provider: "claude", shared_with: [], windows: [{ scope: "all", seconds: 18000, left: 70, reset_ms: Date.now() + 3_600_000, state: "current", applies: true }] }]])
+  const updateQuota = (left: number) => {
+    credentials.get("claude-a.json").windows[0].left = left
+    revision++
+    for (const wake of [...waiting]) wake()
+  }
   const server = Bun.serve({
     port: 0,
     async fetch(req) {
@@ -50,8 +59,18 @@ export function fakeCPA(opts: FakeOptions) {
         if (!authorised && !claimed) return Response.json({ error: "unauthorized" }, { status: 401 })
         if (url.searchParams.get("view") === "prices")
           return Response.json({ protocol: 1, view: "prices", unit: "usd_per_million_tokens", revision: 1, models: { "claude-opus-5-5": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25, source: "imported" }, "gpt-6-sol": { input: 2, output: 8, source: "manual" } } })
-        if (url.searchParams.get("view") === "usage")
-          return Response.json({ protocol: 1, view: "usage", now: Math.floor(Date.now() / 1000), ...(claimed ? { next_use: opts.nextUse?.() } : {}), credentials: [{ id: "claude-a.json", alias: "A", provider: "claude", shared_with: [], windows: [{ scope: "all", seconds: 18000, left: 70, reset_ms: Date.now() + 3_600_000, state: "current", applies: true }] }] })
+        if (url.searchParams.get("view") === "usage") {
+          if (opts.usageWatch && url.searchParams.get("cursor") === String(revision)) {
+            await new Promise<void>((resolve) => {
+              const wake = () => { clearTimeout(timer); waiting.delete(wake); req.signal.removeEventListener("abort", wake); resolve() }
+              const timer = setTimeout(wake, 20000)
+              waiting.add(wake)
+              req.signal.addEventListener("abort", wake, { once: true })
+              if (req.signal.aborted) wake()
+            })
+          }
+          return Response.json({ protocol: 1, view: "usage", now: Math.floor(Date.now() / 1000), now_ms: Date.now(), ...(opts.usageWatch ? { cursor: String(revision) } : {}), ...(claimed ? { next_use: opts.nextUse?.() } : {}), credentials: [...credentials.values()] })
+        }
         return Response.json({ error: "bad" }, { status: 400 })
       }
       if (!authorised) return Response.json({ error: "unauthorized" }, { status: 401 })
@@ -82,6 +101,12 @@ export function fakeCPA(opts: FakeOptions) {
           )
         }
         entry.status = 200
+        if (quota) {
+          const value = JSON.parse(Buffer.from(quota, "base64url").toString())
+          credentials.set(value.auth, { id: value.auth, alias: value.alias ?? value.auth, provider: value.provider, shared_with: [], windows: value.windows })
+          revision++
+          for (const wake of [...waiting]) wake()
+        }
         const output = opts.accountSwitch && body.model === HAIKU.id
           ? "## Objective\n- Reply with pong.\n\n## Requirements\n- Reply exactly.\n\n## Decisions\n- None.\n\n## Work State\n### Completed\n- Request received.\n### Active\n- Reply pending.\n### Blocked\n- None.\n\n## Next Move\n1. Reply with pong.\n\n## Relevant Files\n- None.\n\n## Important Context\n- This is a test."
           : "pong"
@@ -127,5 +152,5 @@ export function fakeCPA(opts: FakeOptions) {
       return new Response("not found", { status: 404 })
     },
   })
-  return { url: `http://127.0.0.1:${server.port}`, seen, stop: () => server.stop(true) }
+  return { url: `http://127.0.0.1:${server.port}`, seen, updateQuota, stop: () => { for (const wake of [...waiting]) wake(); server.stop(true) } }
 }

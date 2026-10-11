@@ -107,9 +107,15 @@ expose that capability in the UI, and do not trigger a switch or provider quota 
 
 Percentages update immediately from each response's `X-Pacer-Quota`, including
 known aliases sharing that quota. This is one header decode and an in-memory update,
-with UI events pushed immediately and disk persistence throttled. There is no extra
-network request per inference response and no per-token processing. Summary/title
+with UI events pushed immediately and disk persistence throttled. The response hook
+performs no extra network request and no per-token processing. Summary/title
 responses refresh percentages without replacing the primary chat's LAST USED marker.
+
+V2 also subscribes to Pacer's shared credential changes. Headers from **any user**
+update idle viewers immediately through a held usage GET and local RPC events;
+the viewing chat does not need to make a request. The subscription reconnects with
+an opaque cursor and backs off on errors. Old servers fall back to reading Pacer's
+stored view every five seconds. Neither path calls provider quota endpoints.
 
 ## Settings you can keep
 

@@ -27,7 +27,7 @@ import {
   normaliseBaseURL,
   originOf,
   prices as fetchPrices,
-  usage as fetchUsage,
+  watchUsage,
   type Connection,
 } from "../core/cpa.js"
 import { Meter } from "../core/meter.js"
@@ -55,7 +55,6 @@ export const BASE_URL_PATTERN = String.raw`^(https://[^/\s]+|http://(localhost|1
 
 const CATALOGUE_REFRESH_MS = 5 * 60_000
 const CATALOGUE_RETRY_MS = 15_000
-const USAGE_REFRESH_MS = 60_000
 const DISCOVERY_TTL_MS = 5 * 60_000
 const TIMEOUT_MS = 8_000
 const PERSIST_MS = 5_000
@@ -374,6 +373,7 @@ export async function setup(ctx: Context) {
     const route = state.route
     if (!route) {
       state.pacer = false
+      syncUsage()
       if (state.catalogue) {
         state.catalogue = undefined
         state.catalogueText = undefined
@@ -388,6 +388,7 @@ export async function setup(ctx: Context) {
     }
     state.pacer = discovery.pacer
     state.views = discovery.views
+    syncUsage()
     let catalogue: Catalogue
     try {
       catalogue = parseCatalogue(await fetchModels(fetch, route as Connection, TIMEOUT_MS))
@@ -412,18 +413,21 @@ export async function setup(ctx: Context) {
     return true
   }
 
-  const pollUsage = async () => {
+  let usageFeed: { baseURL: string; key: string; controller: AbortController } | undefined
+  const syncUsage = () => {
     const route = state.route
-    if (!route || !state.pacer) return
-    try {
-      meter.applyView(await fetchUsage(fetch, route as Connection, TIMEOUT_MS))
-    } catch {
-      // Keep the last view; the reply-carried quota still updates the meter.
+    if (route && state.pacer && usageFeed?.baseURL === route.baseURL && usageFeed.key === route.key) return
+    usageFeed?.controller.abort()
+    usageFeed = undefined
+    if (route && state.pacer) {
+      const controller = new AbortController()
+      usageFeed = { baseURL: route.baseURL, key: route.key, controller }
+      void watchUsage(fetch, route, (view) => meter.applyView(view), controller.signal)
     }
   }
 
   // ---- loops: catalogue quickly until every route answers, then every five
-  // minutes; the usage view every minute; a connect wakes both immediately.
+  // minutes; shared usage is delivered by Pacer's change subscription.
   let catalogueTimer: ReturnType<typeof setTimeout> | undefined
   const scheduleCatalogue = (delay: number) => {
     catalogueTimer = setTimeout(async () => {
@@ -437,10 +441,7 @@ export async function setup(ctx: Context) {
   if (state.route && !restored)
     scheduleCatalogue((await refresh().catch(() => false)) ? CATALOGUE_REFRESH_MS : CATALOGUE_RETRY_MS)
   else scheduleCatalogue(0)
-  const usageTimer = setInterval(() => {
-    void pollUsage()
-  }, USAGE_REFRESH_MS)
-  unref(usageTimer)
+  syncUsage()
 
   const controller = new AbortController()
   void (async () => {
@@ -458,7 +459,7 @@ export async function setup(ctx: Context) {
         }
         if (type !== "credential.switched") continue
         await refresh().catch(() => {})
-        await pollUsage()
+        syncUsage()
       }
     } catch {
       // The subscription ends with the plugin; nothing to report.
@@ -468,7 +469,7 @@ export async function setup(ctx: Context) {
   return () => {
     controller.abort()
     if (catalogueTimer) clearTimeout(catalogueTimer)
-    clearInterval(usageTimer)
+    usageFeed?.controller.abort()
     for (const entry of switches.values()) clearTimeout(entry.timer)
   }
 }

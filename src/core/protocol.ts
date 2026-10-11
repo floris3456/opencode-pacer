@@ -133,6 +133,8 @@ export interface UsageCredential {
 
 export interface UsageView {
   now_ms: number
+  /** Opaque Pacer-instance cursor for the shared change subscription. */
+  cursor?: string
   credentials: UsageCredential[]
   next_use?: NextUse
   active?: string[]
@@ -190,7 +192,8 @@ export function parseUsage(raw: unknown): UsageView | undefined {
       windows: c.windows.map(parseWindow).filter((w): w is QuotaWindow => !!w),
     })
   }
-  return { now_ms: now ? now * 1000 : Date.now(), credentials, next_use: parseNextUse(d.next_use), active: Array.isArray(d.active) ? d.active.filter((id): id is string => typeof id === "string") : undefined }
+  const cursor = str(d.cursor)
+  return { now_ms: num(d.now_ms) ?? (now ? now * 1000 : Date.now()), cursor: cursor && cursor.length <= 128 ? cursor : undefined, credentials, next_use: parseNextUse(d.next_use), active: Array.isArray(d.active) ? d.active.filter((id): id is string => typeof id === "string") : undefined }
 }
 
 /** A model's price: USD per million tokens, as Pacer values usage. */

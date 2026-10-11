@@ -39,13 +39,13 @@ export class HttpError extends Error {
   }
 }
 
-async function getJSON(fetchFn: Fetch, url: string, key: string | undefined, timeoutMs: number): Promise<unknown> {
+async function getJSON(fetchFn: Fetch, url: string, key: string | undefined, timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const headers: Record<string, string> = { Accept: "application/json" }
     if (key) headers.Authorization = `Bearer ${key}`
-    const res = await fetchFn(url, { headers, signal: controller.signal, redirect: "error" })
+    const res = await fetchFn(url, { headers, signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal, redirect: "error" })
     if (!res.ok) throw new HttpError(res.status, `${new URL(url).pathname} answered HTTP ${res.status}`)
     return await res.json()
   } finally {
@@ -65,11 +65,46 @@ export async function discover(fetchFn: Fetch, baseURL: string, timeoutMs = 5000
 }
 
 /** Every account with a quota meter. Served from Pacer's copy: no provider is asked. */
-export async function usage(fetchFn: Fetch, conn: Connection, timeoutMs = 5000): Promise<UsageView> {
-  const url = `${originOf(conn.baseURL)}${EVENTS}?view=usage&auth=api-key&all=true&v=1`
-  const view = parseUsage(await getJSON(fetchFn, url, conn.key, timeoutMs))
+export async function usage(fetchFn: Fetch, conn: Connection, timeoutMs = 5000, watch?: { cursor?: string; waitMs: number; signal: AbortSignal }): Promise<UsageView> {
+  const url = new URL(`${originOf(conn.baseURL)}${EVENTS}?view=usage&auth=api-key&all=true&v=1`)
+  if (watch) {
+    url.searchParams.set("wait_ms", String(watch.waitMs))
+    if (watch.cursor) url.searchParams.set("cursor", watch.cursor)
+  }
+  const view = parseUsage(await getJSON(fetchFn, url.href, conn.key, timeoutMs, watch?.signal))
   if (!view) throw new Error("Pacer's usage view was not understood")
   return view
+}
+
+/** One cancellable shared-credential subscription per OpenCode plugin instance.
+ * Pacer wakes the held GET when ANY caller contributes a quota observation.
+ * Older servers without cursors fall back to reads of their stored view only.
+ */
+export async function watchUsage(fetchFn: Fetch, conn: Connection, onView: (view: UsageView) => void, signal: AbortSignal): Promise<void> {
+  let cursor: string | undefined
+  let retry = 1000
+  while (!signal.aborted) {
+    let delay: number
+    try {
+      const view = await usage(fetchFn, conn, 30_000, { cursor, waitMs: 20_000, signal })
+      if (signal.aborted) return
+      onView(view)
+      cursor = view.cursor
+      retry = 1000
+      // Coalesce bursts without making inference wait for slow viewers.
+      delay = cursor ? 50 : 5000
+    } catch {
+      if (signal.aborted) return
+      delay = retry
+      retry = Math.min(retry * 2, 30_000)
+    }
+    await new Promise<void>((resolve) => {
+      const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve() }
+      const timer = setTimeout(finish, delay)
+      signal.addEventListener("abort", finish, { once: true })
+      if (signal.aborted) finish()
+    })
+  }
 }
 
 /** A chat capability authorizes its own preview; the CPA API key cannot select another chat. */
