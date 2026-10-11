@@ -1,3 +1,5 @@
+// Keep Solid state in a TSX module so stock OpenCode's runtime plugin loader
+// resolves it against the same reactive runtime as the rendered components.
 import type { Context } from "@opencode/plugin/tui/context"
 import { createEffect, createMemo, createRoot, createSignal, onCleanup } from "solid-js"
 import { Meter, type MeterSnapshot } from "../core/meter.js"
@@ -68,8 +70,12 @@ export function createUsageStore(context: Context, options: { interval?: number 
         pending = false
         setClock(Date.now())
       }
-      void load()
-      const timer = setInterval(() => { setClock(Date.now()); void load() }, options.interval ?? 5000)
+      const refresh = () => void load().catch(() => {
+        pending = false
+        if (!disposed) setFailure("Credential usage could not be retrieved. Retrying automatically.")
+      })
+      refresh()
+      const timer = setInterval(() => { setClock(Date.now()); refresh() }, options.interval ?? 5000)
       onCleanup(() => { disposed = true; clearInterval(timer) })
     })
     const snapshot = createMemo<UsageSnapshot | undefined>(() => {
