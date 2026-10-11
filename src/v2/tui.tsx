@@ -70,6 +70,10 @@ function View(props: {
     if (value && last && value.auth === last.auth && last.at_ms >= value.at_ms) return undefined
     return value && value.expires_ms > now() ? value : undefined
   }
+  const inUse = (id: string) =>
+    props.context.data.session.status(props.sessionID) === "running" &&
+    (props.snapshot()?.activity?.[props.sessionID]?.auth === id ||
+      ((active()?.expires ?? 0) > now() && active()?.ids.includes(id)))
   const rows = createMemo<CredentialState[]>(() => {
     const snapshot = props.snapshot()
     if (!snapshot) return []
@@ -100,10 +104,10 @@ function View(props: {
                 {row.alias}
                 <span style={{ fg: theme.text.muted }}> {row.provider}</span>
               </text>
-              <Show when={served()?.auth === row.id}>
+              <Show when={served()?.auth === row.id && !inUse(row.id)}>
                 <text fg={theme.text.feedback.info.base}>LAST USED</text>
               </Show>
-              <Show when={props.context.data.session.status(props.sessionID) === "running" && (props.snapshot()?.activity?.[props.sessionID]?.auth === row.id || ((active()?.expires ?? 0) > now() && active()?.ids.includes(row.id)))}>
+              <Show when={inUse(row.id)}>
                 <text fg={theme.text.feedback.success.base}>IN USE</text>
               </Show>
               <Show when={nextUse()?.auth === row.id && nextUse()?.provider === row.provider}>
