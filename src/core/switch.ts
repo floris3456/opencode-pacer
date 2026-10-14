@@ -74,18 +74,31 @@ export function parseBinding(headers: Headers): { generation: number; alias: str
  * is `error.code`, or prefixes `error.message` ("quota_compact_required: …").
  */
 export async function compactRequired(response: Response): Promise<boolean> {
-  if (response.status !== 409 || response.headers.get(PROTOCOL_HEADER) !== "1") return false
+  return (await compactRefusal(response)) !== undefined
+}
+
+/**
+ * That refusal, with the models Pacer names to write the summary
+ * (`compaction_models`: CPA model names, first choice first; empty when the
+ * client decides).
+ */
+export async function compactRefusal(response: Response): Promise<{ models: string[] } | undefined> {
+  if (response.status !== 409 || response.headers.get(PROTOCOL_HEADER) !== "1") return undefined
   const text = await response
     .clone()
     .text()
     .catch(() => "")
-  if (text.length > 16384) return false
+  if (text.length > 16384) return undefined
   try {
-    const error = (JSON.parse(text) as { error?: { code?: unknown; message?: unknown } }).error
-    if (error?.code === COMPACT_REQUIRED) return true
-    return typeof error?.message === "string" && error.message.startsWith(`${COMPACT_REQUIRED}:`)
+    const error = (JSON.parse(text) as { error?: { code?: unknown; message?: unknown; compaction_models?: unknown } }).error
+    const refused =
+      error?.code === COMPACT_REQUIRED ||
+      (typeof error?.message === "string" && error.message.startsWith(`${COMPACT_REQUIRED}:`))
+    if (!refused) return undefined
+    const named = Array.isArray(error?.compaction_models) ? error.compaction_models : []
+    return { models: named.filter((model): model is string => typeof model === "string" && model.length > 0).slice(0, 8) }
   } catch {
-    return false
+    return undefined
   }
 }
 

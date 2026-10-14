@@ -7,6 +7,7 @@ import {
   BINDING_HEADER,
   PROTOCOL_HEADER,
   claim,
+  compactRefusal,
   compactRequired,
   newBinding,
   parseBinding,
@@ -98,5 +99,14 @@ describe("replies", () => {
     const reply = refusedAgainReply()
     expect(reply.status).toBe(400)
     expect(JSON.stringify(await reply.json())).not.toMatch(overflow)
+  })
+})
+
+describe("compactRefusal", () => {
+  const refusal = (body: unknown) => new Response(JSON.stringify(body), { status: 409, headers: { [PROTOCOL_HEADER]: "1" } })
+  test("carries the summary models Pacer names, in order", async () => {
+    expect(await compactRefusal(refusal({ error: { code: "quota_compact_required", compaction_models: ["claude-sonnet-4-6", 3, "", "claude-haiku-4-5"] } }))).toEqual({ models: ["claude-sonnet-4-6", "claude-haiku-4-5"] })
+    expect(await compactRefusal(refusal({ error: { code: "quota_compact_required" } }))).toEqual({ models: [] })
+    expect(await compactRefusal(refusal({ error: { code: "quota_budget_wait", compaction_models: ["x"] } }))).toBeUndefined()
   })
 })

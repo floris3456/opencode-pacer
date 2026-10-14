@@ -73,3 +73,13 @@ test("a request updates all shared quota meters immediately, without moving LAST
   meter.applyReply({ v: 1, auth: "a", provider: "claude", at_ms: 1500, windows: [] })
   expect(meter.rows().find((row) => row.id === "a-alias")?.windows[0].left).toBe(38.25)
 })
+
+test("the preview names a coming forced move apart from the cold move, only while Pacer routes", () => {
+  const routing = { ...preview, mode: "active", warm: true, force_auth: "c", force_alias: "Forced", force_reason: "soon" } as const
+  expect(parseNextUse(routing)).toMatchObject({ warm: true, auth: "b", force_auth: "c", force_alias: "Forced", force_reason: "soon" })
+  expect(parseNextUse({ ...routing, force_reason: "later" })).toMatchObject({ auth: "b", force_auth: undefined, force_reason: undefined })
+  expect(parseNextUse({ ...routing, mode: "dry-run" })?.force_auth).toBeUndefined()
+  expect(parseNextUse({ ...routing, force_auth: 7 })?.force_auth).toBeUndefined()
+  // Older Pacer versions send neither field.
+  expect(parseNextUse(preview)).toMatchObject({ warm: undefined, force_auth: undefined })
+})

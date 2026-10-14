@@ -49,7 +49,9 @@ credential usage popup; the sidebar stays scoped to the selected model's provide
 
 Claude chat requests ask Pacer for `compact_on_switch`. When Pacer replies with
 `409 quota_compact_required`, the plugin turns that refusal into a context-overflow
-response. OpenCode writes a summary using Claude Haiku, then automatically retries
+response. OpenCode writes a summary using the first summary model Pacer names with
+the refusal that CPA lists (the Pacer page's "summary models"), else
+`compactionModel`, else Claude Haiku, then automatically retries
 with the chat's original model and the new checkpoint. No extra user message is needed.
 Ordinary compaction keeps your configured summary model. A second switch refusal
 after the summary stops with an error instead of summarising repeatedly.
@@ -79,8 +81,9 @@ Stock v2's summary-agent model is location-wide: another chat compacting during
 the brief handoff window may also use Haiku. The override is cleared on the resumed
 request, execution completion/failure/interruption, or after ten minutes.
 Warming (`generate`) requests also carry claims, but refusals fail the ping rather
-than starting compaction. Actual exhausted-account warming behavior still needs
-live verification; successful claim acknowledgements alone do not prove it.
+than starting compaction. Pacer keeps a chat's pings on the chat's account, where
+they renew its cache, and counts them as activity, so a chat kept warm by pings is
+not moved as cold.
 
 ## Next credential and live meters (OpenCode 2.x)
 
@@ -91,13 +94,16 @@ including before its first request. `/usage` opens the selected-model view;
 toggles details, **←/→** page, and **Esc** closes. Popup scope never widens the sidebar.
 
 With a Pacer server that exposes per-chat routing previews, the sidebar shows
-**NEXT USE** on Pacer's proposed replacement, separately from **LAST USED**.
+**NEXT USE** on the account Pacer moves the chat to once its cache is cold, while
+the chat is still warm, and **FORCE USE** on the account a forced move will send
+it to: when its account is at a floor, or within the Pacer page's forced-move
+warning of one. Both appear only for another account than the chat's; FORCE USE
+wins when both name the same one. Both are shown separately from **LAST USED**.
 **IN USE** marks the credential serving the current turn, immediately from the
 primary response header. It clears when the turn ends. Pacer's activity poll also
 covers requests awaiting response headers, without an additional polling request.
 `dry-run` is labelled explicitly: it is Pacer's preference, not a guarantee of
-which credential CPA will actually select. Economic moves appear only after cache
-protection expires; forced quota switches can appear sooner. The preview uses
+which credential CPA will actually select. The preview uses
 the last request's eligible candidates and current server-side quota/cache evidence.
 
 The visible sidebar refreshes the preview every 15 seconds. Stale or failed reads
@@ -144,6 +150,7 @@ bun run typecheck
 ```sh
 bun test/hosts/v2-switch.ts /path/to/opencode-v2
 REFUSE_AGAIN=1 bun test/hosts/v2-switch.ts /path/to/opencode-v2
+PACER_MODELS=1 bun test/hosts/v2-switch.ts /path/to/opencode-v2
 ```
 
 ## License

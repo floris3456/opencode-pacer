@@ -36,7 +36,7 @@ import { CLIENT_HEADER, QUOTA_HEADER, declaration, decodeQuota, type Discovery }
 import {
   CLAIM_HEADER,
   claim,
-  compactRequired,
+  compactRefusal,
   newBinding,
   newInstallation,
   parseBinding,
@@ -224,10 +224,13 @@ export async function setup(ctx: Context) {
 
   /** Chats CPA is moving: the checkpoint the refused request carried, and the summary model in use. */
   const switches = new Map<string, { checkpoint: string; model?: string; timer: ReturnType<typeof setTimeout> }>()
-  const summaryModel = () => {
+  /** The first model Pacer names that CPA lists, else `compactionModel`, else Claude Haiku. */
+  const summaryModel = (named: readonly string[] = []) => {
+    const chat = (id: string) => state.catalogue?.models.some((model) => model.kind === "chat" && model.id === id)
+    const pacer = named.find(chat)
     const configured = typeof options.compactionModel === "string" ? options.compactionModel.trim() : ""
     const haiku = state.catalogue?.models.find((model) => model.kind === "chat" && model.id.startsWith("claude-haiku"))
-    const ref = configured || (haiku ? `${PROVIDER_ID}/${haiku.id}` : "")
+    const ref = pacer ? `${PROVIDER_ID}/${pacer}` : configured || (haiku ? `${PROVIDER_ID}/${haiku.id}` : "")
     if (!ref) return undefined
     try {
       Model.Ref.parse(ref)
@@ -309,7 +312,8 @@ export async function setup(ctx: Context) {
       const claimed = claims.get(event.request)
       if (!claimed) return
       claims.delete(event.request)
-      if (await compactRequired(event.response)) {
+      const refusal = await compactRefusal(event.response)
+      if (refusal) {
         // A refused warming ping just fails: it must not carry the whole chat to another account.
         if (claimed.kind !== "primary") return
         if (switches.has(claimed.session)) {
@@ -318,7 +322,7 @@ export async function setup(ctx: Context) {
           event.response = refusedAgainReply()
           return
         }
-        const model = summaryModel()
+        const model = summaryModel(refusal.models)
         const timer = setTimeout(() => void endSwitch(claimed.session).catch(console.error), SWITCH_TIMEOUT_MS)
         unref(timer)
         switches.set(claimed.session, { checkpoint: claimed.checkpoint, model, timer })

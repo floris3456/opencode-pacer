@@ -1,6 +1,7 @@
 // Real stock OpenCode 2.x with this plugin, against a fake CPA whose Pacer
 // moves the chat to another account with `compact_on_switch`. Checks that the
-// refused step is summarised by Claude Haiku, then rerun on the chat's own
+// refused step is summarised by Claude Haiku (or the first summary model
+// Pacer names that CPA lists), then rerun on the chat's own
 // model with that summary as its checkpoint, and that OpenCode's summary
 // agent is back to the user's own model afterwards.
 // Usage: bun test/hosts/v2-switch.ts <path to the opencode 2.x binary>
@@ -15,11 +16,15 @@ const [bin] = process.argv.slice(2)
 if (!bin) throw new Error("usage: v2-switch.ts <opencode>")
 const KEY = "sk-host-test-0123456789"
 const refuseAgain = process.env.REFUSE_AGAIN === "1"
+// PACER_MODELS=1: the refusal names summary models; the first one CPA lists writes the summary.
+const pacerModels = process.env.PACER_MODELS === "1"
+const summaryModel = pacerModels ? "claude-sonnet-5" : "claude-haiku-5-5"
 const sessionID = `ses_pacerpreview${Math.random().toString(16).slice(2)}`
 const cpa = fakeCPA({ key: KEY, pacer: true, accountSwitch: true, refuseAgain,
+  ...(pacerModels ? { compactionModels: ["claude-unlisted", "claude-sonnet-5"] } : {}),
   usageWatch: true,
   primaryStreamDelayMs: 3000,
-  nextUse: () => ({ v: 1, at_ms: Date.now(), expires_ms: Date.now() + 30000, mode: "dry-run", provider: "claude", model: "claude-opus-5-5", reason: "cold_move", auth: "claude-next.json", alias: "Next", forced: false }),
+  nextUse: () => ({ v: 1, at_ms: Date.now(), expires_ms: Date.now() + 30000, mode: "active", provider: "claude", model: "claude-opus-5-5", reason: "cold_move", warm: true, auth: "claude-next.json", alias: "Next", forced: false, force_auth: "claude-forced.json", force_alias: "Forced", force_reason: "soon" }),
   quota: (req) => Buffer.from(JSON.stringify({ v: 1, at_ms: Date.now(), provider: "claude", auth: req.headers.get("x-quota-handoff") ? "claude-a.json" : "claude-aux.json", windows: [{ scope: "all", seconds: 18000, left: 37.5, state: "current", applies: true }] })).toString("base64url"),
 })
 
@@ -113,11 +118,11 @@ cpa.stop()
 const models = cpa.seen.filter((s) => s.path.startsWith("/v1/messages"))
 const refusal = models.findIndex((s) => s.status === 409)
 const after = models.slice(refusal + 1)
-const summaries = after.filter((s) => s.model === "claude-haiku-5-5")
+const summaries = after.filter((s) => s.model === summaryModel)
 const rerun = after.find((s) => s.model === "claude-opus-5-5" && s.claim?.kind === "primary")
 checks.step_claimed_and_refused = refusal >= 0 && models[refusal]?.claim?.compact_on_switch === true
 checks.capability_is_a_digest = /^[a-f0-9]{64}$/.test(String(models[refusal]?.claim?.capability ?? ""))
-checks.one_summary_by_haiku = summaries.length === 1 && summaries[0]!.claim === undefined
+checks.one_summary_by_expected_model = summaries.length === 1 && summaries[0]!.claim === undefined
 checks.rerun_on_opus_with_new_checkpoint =
   rerun?.status === (refuseAgain ? 409 : 200) && typeof rerun.claim?.checkpoint === "string" && rerun.claim.checkpoint !== ""
 checks.expected_outcome = refuseAgain
@@ -139,7 +144,7 @@ if (!refuseAgain) {
   checks.live_response_percentage = snapshot?.credentials?.find((row: { id: string }) => row.id === "claude-a.json")?.windows?.[0]?.left === 37.5
   checks.last_used_primary = snapshot?.served?.[sessionID]?.auth === "claude-a.json"
   checks.in_use_cleared_after_turn = snapshot?.activity?.[sessionID] !== undefined && snapshot.activity[sessionID].auth === undefined
-  checks.server_preview = preview?.auth === "claude-next.json" && preview?.mode === "dry-run"
+  checks.server_preview = preview?.auth === "claude-next.json" && preview?.mode === "active" && preview?.warm === true && preview?.force_auth === "claude-forced.json" && preview?.force_reason === "soon"
 }
 
 const ok = Object.values(checks).every(Boolean)

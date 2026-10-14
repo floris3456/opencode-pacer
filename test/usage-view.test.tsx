@@ -4,7 +4,7 @@ import { RGBA } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { render, type JSX } from "@opentui/solid"
 import { createRoot, createSignal } from "solid-js"
-import { createUsage } from "../src/v2/usage-view.js"
+import { createUsage, usageMarker } from "../src/v2/usage-view.js"
 import { Meter } from "../src/core/meter.js"
 import type { PacerMeterEvent } from "../src/rpc.js"
 import type { NextUse } from "../src/core/protocol.js"
@@ -142,4 +142,27 @@ test("NEXT USE follows the selected model and the narrow popup remains paged", a
   f.command("pacer.usage.close").run()
   f.setModel({ providerID: "cliproxyapi", modelID: "claude-sonnet" })
   expect(await frame(output)).not.toContain("NEXT USE")
+})
+
+test("FORCE USE marks where a forced move sends the chat and replaces NEXT USE on that credential", async () => {
+  const f = fixture()
+  f.setModel({ providerID: "cliproxyapi", modelID: "gpt-5" })
+  const base = { v: 1, at_ms: Date.now(), expires_ms: Date.now() + 30000, mode: "active", provider: "codex", model: "gpt-5", reason: "cold_move", forced: false } as const
+  f.state.next = { ...base, auth: "account-1", force_auth: "account-2", force_reason: "soon" }
+  const output = await mount(f, 45, 40)
+  const both = await frame(output)
+  expect(both).toContain("NEXT USE")
+  expect(both).toContain("FORCE USE")
+})
+
+test("one marker per credential: FORCE USE wins, and the chat's own credential gets none", () => {
+  const credential = (id: string) => ({ id, alias: id, provider: "claude", shared_with: [], windows: [] })
+  const snapshot = (next: Partial<NextUse>) => ({
+    protocol: 1, view: "usage", now: 1, max_age_seconds: 90, all: false, provider: "claude", model: "m", current: "a", active: [], last_used: 0, credentials: [],
+    next_use: { v: 1, at_ms: 1, expires_ms: 2, mode: "active", provider: "claude", model: "m", reason: "forced_move", forced: true, ...next },
+  }) as const
+  expect(usageMarker(snapshot({ auth: "b", force_auth: "b", force_reason: "now" }), credential("b"))).toBe("FORCE USE")
+  expect(usageMarker(snapshot({ auth: "b", force_auth: "c", force_reason: "soon" }), credential("b"))).toBe("NEXT USE")
+  expect(usageMarker(snapshot({ auth: "a" }), credential("a"))).toBeUndefined()
+  expect(usageMarker(snapshot({ force_auth: "b", force_reason: "soon" }), { ...credential("b"), provider: "codex" })).toBeUndefined()
 })

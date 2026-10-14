@@ -150,9 +150,16 @@ export interface NextUse {
   provider: string
   model: string
   reason: string
+  /** Pacer's view of the chat's cache: NEXT USE waits until it is cold. */
+  warm?: boolean
+  /** NEXT USE: the account the chat moves to once its cache is cold, only when that is another account. */
   auth?: string
   alias?: string
   forced: boolean
+  /** FORCE USE: where a forced move sends the chat, `now` (its account cannot serve) or `soon` (a meter near its floor). */
+  force_auth?: string
+  force_alias?: string
+  force_reason?: "now" | "soon"
 }
 
 export function parseNextUse(raw: unknown): NextUse | undefined {
@@ -169,7 +176,15 @@ export function parseNextUse(raw: unknown): NextUse | undefined {
   if (typeof value.forced !== "boolean") return undefined
   const auth = str(value.auth)
   if (auth && (mode === "off" || (reason !== "cold_move" && reason !== "forced_move"))) return undefined
-  return { v: 1, at_ms: at, expires_ms: expires, candidates_at_ms: num(value.candidates_at_ms), mode, provider, model, reason, auth, alias: str(value.alias), forced: value.forced }
+  // A forced-move preview is only for a routing Pacer; an unknown reason drops just that part.
+  const forceReason = value.force_reason === "now" || value.force_reason === "soon" ? value.force_reason : undefined
+  const force = mode === "active" && forceReason ? str(value.force_auth) : undefined
+  return {
+    v: 1, at_ms: at, expires_ms: expires, candidates_at_ms: num(value.candidates_at_ms), mode, provider, model, reason,
+    warm: typeof value.warm === "boolean" ? value.warm : undefined,
+    auth, alias: str(value.alias), forced: value.forced,
+    force_auth: force, force_alias: force ? str(value.force_alias) : undefined, force_reason: force ? forceReason : undefined,
+  }
 }
 
 export function parseUsage(raw: unknown): UsageView | undefined {

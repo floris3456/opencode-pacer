@@ -141,7 +141,7 @@ function CredentialView(props: { context: Context; store: UsageStore; snapshot: 
   const windows = createMemo(() => credentialWindows(props.credential))
   const labelWidth = () => Math.min(18, Math.max(2, ...windows().map((window) => label(window).length)))
   const identity = () => props.snapshot.active.includes(props.credential.id) ? "IN USE" : props.snapshot.current === props.credential.id ? "LAST USED" : undefined
-  const next = () => props.snapshot.next_use?.auth === props.credential.id && props.snapshot.next_use.provider === props.credential.provider ? props.snapshot.next_use : undefined
+  const marker = () => usageMarker(props.snapshot, props.credential)
   return (
     <box flexShrink={0}>
       <box flexDirection="row">
@@ -150,7 +150,7 @@ function CredentialView(props: { context: Context; store: UsageStore; snapshot: 
         <span style={{ fg: theme.text.muted }}> · {props.credential.provider}</span>
       </text>
       <Show when={identity()}><text flexShrink={0} fg={identity() === "IN USE" ? theme.text.feedback.success.base : theme.text.feedback.info.base}> · {identity()}</text></Show>
-      <Show when={next()}><text flexShrink={0} fg={theme.text.feedback.info.base}> · NEXT USE{next()?.mode === "dry-run" ? " · dry-run" : ""}</text></Show>
+      <Show when={marker()}><text flexShrink={0} fg={marker() === "FORCE USE" ? theme.text.feedback.warning.base : theme.text.feedback.info.base}> · {marker()}{props.snapshot.next_use?.mode === "dry-run" ? " · dry-run" : ""}</text></Show>
       </box>
       <Show when={props.details}>
         <text fg={theme.text.muted} wrapMode="none" truncate>{props.credential.id}</text>
@@ -177,6 +177,17 @@ function CredentialView(props: { context: Context; store: UsageStore; snapshot: 
       </Show>
     </box>
   )
+}
+/**
+ * Pacer's preview for this credential: FORCE USE where a forced move will send
+ * the chat, else NEXT USE where it goes once its cache is cold. Never the chat's
+ * current credential: it stays there.
+ */
+export function usageMarker(snapshot: UsageSnapshot, credential: Credential): "FORCE USE" | "NEXT USE" | undefined {
+  const next = snapshot.next_use
+  if (!next || next.provider !== credential.provider || credential.id === snapshot.current) return undefined
+  if (next.force_auth === credential.id) return "FORCE USE"
+  if (next.auth === credential.id) return "NEXT USE"
 }
 function credentialWindows(credential: Credential) {
   const windows = credential.windows.filter((window) => !window.not_applicable)

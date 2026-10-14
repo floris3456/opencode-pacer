@@ -24,6 +24,8 @@ export interface FakeOptions {
   accountSwitch?: boolean
   /** Refuse the resumed primary request too, to check the recovery loop guard. */
   refuseAgain?: boolean
+  /** Summary models Pacer names with the refusal (`compaction_models`); the listed ones join the catalogue. */
+  compactionModels?: string[]
   nextUse?: () => unknown
   primaryStreamDelayMs?: number
   usageWatch?: boolean
@@ -83,6 +85,7 @@ export function fakeCPA(opts: FakeOptions) {
             { id: "gpt-6-sol", owned_by: "openai", kind: "chat", providers: ["codex"], context_length: 400000, input_length: 272000, max_completion_tokens: 128000, reasoning: { mode: "levels", levels: ["low", "medium", "high", "xhigh"] }, service_tiers: ["priority"] },
             { id: "gpt-image-2", owned_by: "openai", kind: "image", providers: ["codex"], reasoning: { mode: "none" } },
             ...(opts.accountSwitch ? [HAIKU] : []),
+            ...(opts.compactionModels ?? []).filter((id) => !id.includes("unlisted")).map((id) => ({ ...HAIKU, id, display_name: id })),
           ],
         })
       if (url.pathname === "/v1/chat/completions" || url.pathname === "/v1/messages") {
@@ -96,7 +99,7 @@ export function fakeCPA(opts: FakeOptions) {
           refused = true
           entry.status = 409
           return Response.json(
-            { error: { type: "quota_handoff", code: "quota_compact_required", message: "quota_compact_required: the account is used up" } },
+            { error: { type: "quota_handoff", code: "quota_compact_required", message: "quota_compact_required: the account is used up", ...(opts.compactionModels ? { compaction_models: opts.compactionModels } : {}) } },
             { status: 409, headers: { "X-Quota-Protocol": "1" } },
           )
         }
@@ -107,7 +110,7 @@ export function fakeCPA(opts: FakeOptions) {
           revision++
           for (const wake of [...waiting]) wake()
         }
-        const output = opts.accountSwitch && body.model === HAIKU.id
+        const output = opts.accountSwitch && (body.model === HAIKU.id || opts.compactionModels?.includes(String(body.model)))
           ? "## Objective\n- Reply with pong.\n\n## Requirements\n- Reply exactly.\n\n## Decisions\n- None.\n\n## Work State\n### Completed\n- Request received.\n### Active\n- Reply pending.\n### Blocked\n- None.\n\n## Next Move\n1. Reply with pong.\n\n## Relevant Files\n- None.\n\n## Important Context\n- This is a test."
           : "pong"
         const headers = new Headers({ "content-type": body.stream ? "text/event-stream" : "application/json" })
