@@ -417,8 +417,11 @@ export async function setup(ctx: Context) {
     return true
   }
 
+  /** Set by the returned cleanup: work still running then starts no loop. */
+  let disposed = false
   let usageFeed: { baseURL: string; key: string; controller: AbortController } | undefined
   const syncUsage = () => {
+    if (disposed) return
     const route = state.route
     if (route && state.pacer && usageFeed?.baseURL === route.baseURL && usageFeed.key === route.key) return
     usageFeed?.controller.abort()
@@ -434,6 +437,7 @@ export async function setup(ctx: Context) {
   // minutes; shared usage is delivered by Pacer's change subscription.
   let catalogueTimer: ReturnType<typeof setTimeout> | undefined
   const scheduleCatalogue = (delay: number) => {
+    if (disposed) return
     catalogueTimer = setTimeout(async () => {
       const reached = await refresh().catch(() => false)
       scheduleCatalogue(reached ? CATALOGUE_REFRESH_MS : CATALOGUE_RETRY_MS)
@@ -471,6 +475,7 @@ export async function setup(ctx: Context) {
   })()
 
   return () => {
+    disposed = true
     controller.abort()
     if (catalogueTimer) clearTimeout(catalogueTimer)
     usageFeed?.controller.abort()
