@@ -180,14 +180,17 @@ function CredentialView(props: { context: Context; store: UsageStore; snapshot: 
 }
 /**
  * Pacer's preview for this credential: FORCE USE where a forced move will send
- * the chat, else NEXT USE where it goes once its cache is cold. Never the chat's
- * current credential: it stays there.
+ * the chat, else NEXT USE where it goes once its cache is cold: another account
+ * (auth), or the chat's current credential when Pacer keeps it there (cold_stay,
+ * no auth). FORCE USE never marks the current credential.
  */
 export function usageMarker(snapshot: UsageSnapshot, credential: Credential): "FORCE USE" | "NEXT USE" | undefined {
   const next = snapshot.next_use
-  if (!next || next.provider !== credential.provider || credential.id === snapshot.current) return undefined
-  if (next.force_auth === credential.id) return "FORCE USE"
-  if (next.auth === credential.id) return "NEXT USE"
+  if (!next || next.provider !== credential.provider) return undefined
+  const own = credential.id === snapshot.current
+  if (!own && next.force_auth === credential.id) return "FORCE USE"
+  if (!own && next.auth === credential.id) return "NEXT USE"
+  if (own && !next.auth && next.reason === "cold_stay") return "NEXT USE"
 }
 function credentialWindows(credential: Credential) {
   const windows = credential.windows.filter((window) => !window.not_applicable)

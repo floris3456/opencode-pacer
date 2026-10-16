@@ -94,11 +94,12 @@ including before its first request. `/usage` opens the selected-model view;
 toggles details, **←/→** page, and **Esc** closes. Popup scope never widens the sidebar.
 
 With a Pacer server that exposes per-chat routing previews, the sidebar shows
-**NEXT USE** on the account Pacer moves the chat to once its cache is cold, while
-the chat is still warm, and **FORCE USE** on the account a forced move will send
-it to: when its account is at a floor, or within the Pacer page's forced-move
-warning of one. Both appear only for another account than the chat's; FORCE USE
-wins when both name the same one. Both are shown separately from **LAST USED**.
+**NEXT USE** on the account the chat uses once its cache is cold, while the chat
+is still warm: the account Pacer moves it to, or its own account when Pacer keeps
+it there. **FORCE USE** marks the account a forced move will send it to: when its
+account is at a floor, or within the Pacer page's forced-move warning of one.
+FORCE USE appears only for another account than the chat's, and wins when both
+name the same one. Both are shown separately from **LAST USED**.
 **IN USE** marks the credential serving the current turn, immediately from the
 primary response header. It clears when the turn ends. Pacer's activity poll also
 covers requests awaiting response headers, without an additional polling request.

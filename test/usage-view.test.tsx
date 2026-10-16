@@ -155,7 +155,7 @@ test("FORCE USE marks where a forced move sends the chat and replaces NEXT USE o
   expect(both).toContain("FORCE USE")
 })
 
-test("one marker per credential: FORCE USE wins, and the chat's own credential gets none", () => {
+test("one marker per credential: FORCE USE wins; the chat's own credential gets NEXT USE only when Pacer keeps it there", () => {
   const credential = (id: string) => ({ id, alias: id, provider: "claude", shared_with: [], windows: [] })
   const snapshot = (next: Partial<NextUse>) => ({
     protocol: 1, view: "usage", now: 1, max_age_seconds: 90, all: false, provider: "claude", model: "m", current: "a", active: [], last_used: 0, credentials: [],
@@ -165,4 +165,7 @@ test("one marker per credential: FORCE USE wins, and the chat's own credential g
   expect(usageMarker(snapshot({ auth: "b", force_auth: "c", force_reason: "soon" }), credential("b"))).toBe("NEXT USE")
   expect(usageMarker(snapshot({ auth: "a" }), credential("a"))).toBeUndefined()
   expect(usageMarker(snapshot({ force_auth: "b", force_reason: "soon" }), { ...credential("b"), provider: "codex" })).toBeUndefined()
+  expect(usageMarker(snapshot({ reason: "cold_stay", forced: false, force_auth: "a", force_reason: "soon" }), credential("a"))).toBe("NEXT USE")
+  expect(usageMarker(snapshot({ reason: "cold_stay", forced: false }), credential("b"))).toBeUndefined()
+  expect(usageMarker(snapshot({ reason: "no_usable_meters", forced: false }), credential("a"))).toBeUndefined()
 })
