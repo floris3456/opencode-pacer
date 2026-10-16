@@ -44,7 +44,10 @@ function start(api: TuiPluginApi, meter: Meter) {
     if (!conn) return
     if (Date.now() - pacerAt > 5 * 60_000) {
       pacerAt = Date.now()
-      pacer = (await discover(fetch, conn.baseURL)).pacer
+      const answer = await discover(fetch, conn.baseURL)
+      // No answer keeps what was known and asks again at the next read.
+      if (answer) pacer = answer.pacer
+      else pacerAt = 0
     }
     if (!pacer) return
     try {

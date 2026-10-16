@@ -55,12 +55,24 @@ async function getJSON(fetchFn: Fetch, url: string, key: string | undefined, tim
 
 const EVENTS = "/v0/resource/plugins/pacer/events"
 
-/** Whether this CPA runs a Pacer that speaks the client protocol. Sends no key. */
-export async function discover(fetchFn: Fetch, baseURL: string, timeoutMs = 5000): Promise<Discovery> {
+/** Whether this CPA runs a Pacer that speaks the client protocol. Sends no key.
+ * Undefined is no answer: no reply, a timeout or a server error says nothing about
+ * Pacer, so callers keep what they knew. */
+export async function discover(fetchFn: Fetch, baseURL: string, timeoutMs = 5000): Promise<Discovery | undefined> {
+  const res = await fetchFn(originOf(baseURL) + EVENTS, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(timeoutMs),
+    redirect: "manual",
+  }).catch(() => undefined)
+  if (!res || res.status >= 500 || res.status === 408 || res.status === 429) return undefined
+  // A 404 (no Pacer), or a proxy guarding the path with a login redirect or refusal, is an answer.
+  if (!res.ok) return { pacer: false, views: [] }
+  const text = await res.text().catch(() => undefined)
+  if (text === undefined) return undefined
   try {
-    return parseDiscovery(await getJSON(fetchFn, originOf(baseURL) + EVENTS, undefined, timeoutMs))
+    return parseDiscovery(JSON.parse(text))
   } catch {
-    return { pacer: false, views: [] }
+    return parseDiscovery(undefined)
   }
 }
 

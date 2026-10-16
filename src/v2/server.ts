@@ -371,7 +371,8 @@ export async function setup(ctx: Context) {
     await ctx.provider.reload()
   }
 
-  /** Returns whether the catalogue was reached (failed routes keep the last one). */
+  /** Returns whether CPA answered every read; a failed one keeps the last catalogue and discovery, and
+   * the loop asks again at the quick retry. */
   const refresh = async (): Promise<boolean> => {
     await resolveRoute()
     const route = state.route
@@ -385,11 +386,11 @@ export async function setup(ctx: Context) {
       }
       return true
     }
-    let discovery: Discovery = { pacer: state.pacer, views: state.views }
-    if (Date.now() - state.discoveryAt > DISCOVERY_TTL_MS) {
-      discovery = await discover(fetch, route.baseURL, TIMEOUT_MS)
-      state.discoveryAt = Date.now()
-    }
+    const due = Date.now() - state.discoveryAt > DISCOVERY_TTL_MS
+    // A CPA that was not reached is not a CPA without Pacer: without an answer the chats stay claimed.
+    const answer = due ? await discover(fetch, route.baseURL, TIMEOUT_MS) : undefined
+    if (answer) state.discoveryAt = Date.now()
+    const discovery: Discovery = answer ?? { pacer: state.pacer, views: state.views }
     state.pacer = discovery.pacer
     state.views = discovery.views
     syncUsage()
@@ -414,7 +415,7 @@ export async function setup(ctx: Context) {
       savedText = record
       await ctx.storage.set("catalogue", JSON.parse(record)).catch(() => {})
     }
-    return true
+    return !due || answer !== undefined
   }
 
   /** Set by the returned cleanup: work still running then starts no loop. */

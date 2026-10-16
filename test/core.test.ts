@@ -96,7 +96,7 @@ describe("cpa", () => {
       return new Response("no", { status: 404 })
     }
     const conn = { baseURL: "https://cpa.example.com/v1", key: "k-123" }
-    expect((await discover(fetchFn, conn.baseURL)).pacer).toBe(true)
+    expect((await discover(fetchFn, conn.baseURL))?.pacer).toBe(true)
     const view = await usage(fetchFn, conn)
     expect(view.now_ms).toBe(1_000_000)
     expect(view.credentials[0].windows[0].left).toBe(50)
@@ -116,6 +116,17 @@ describe("cpa", () => {
   test("a CPA without Pacer is not Pacer", async () => {
     const fetchFn: Fetch = async () => new Response("<html>login</html>", { status: 200, headers: { "content-type": "text/html" } })
     expect(await discover(fetchFn, "https://cpa.example.com/v1")).toEqual({ pacer: false, views: [] })
+  })
+
+  test("a discovery CPA did not answer is no answer, not a CPA without Pacer", async () => {
+    const base = "https://cpa.example.com/v1"
+    const status = (code: number): Fetch => async () => new Response("", { status: code, headers: code === 302 ? { location: "/login" } : {} })
+    const hang: Fetch = (_url, init) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }))
+    expect(await discover(async () => Promise.reject(new TypeError("socket closed")), base)).toBeUndefined()
+    expect(await discover(hang, base, 20)).toBeUndefined()
+    for (const code of [408, 429, 500, 502, 503, 504]) expect(await discover(status(code), base)).toBeUndefined()
+    for (const code of [302, 401, 403, 404]) expect(await discover(status(code), base)).toEqual({ pacer: false, views: [] })
   })
 
   test("plain model list", () => {

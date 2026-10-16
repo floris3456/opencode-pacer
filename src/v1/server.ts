@@ -18,13 +18,14 @@ import { providerEntry } from "./provider.js"
 
 const STARTUP_TIMEOUT = 4000
 const DISCOVERY_TTL = 5 * 60_000
+const DISCOVERY_RETRY = 15_000
 
 /** Fetches the catalogue (and prices when Pacer runs); falls back to the last one. */
 export async function catalogueFor(conn: Connection, fetchFn: typeof fetch = fetch): Promise<Catalogue | undefined> {
   try {
     const [list, discovery] = await Promise.all([models(fetchFn, conn, STARTUP_TIMEOUT), discover(fetchFn, conn.baseURL, STARTUP_TIMEOUT)])
     let catalogue = parseCatalogue(list)
-    if (discovery.pacer && discovery.views.includes("prices")) {
+    if (discovery?.pacer && discovery.views.includes("prices")) {
       try {
         catalogue = withPrices(catalogue, await prices(fetchFn, conn, STARTUP_TIMEOUT))
       } catch {}
@@ -65,7 +66,9 @@ export const server: Plugin = async (_input, options) => {
     const at = Date.now()
     discovery = { at, origin, value: discovery?.origin === origin ? discovery.value : { pacer: false, views: [] } }
     void discover(fetchFn, baseURL).then((value) => {
-      if (discovery?.at === at) discovery = { at, origin, value }
+      if (discovery?.at !== at) return
+      // No answer keeps what was known and asks again soon instead of in five minutes.
+      discovery = value ? { at, origin, value } : { ...discovery, at: at - DISCOVERY_TTL + DISCOVERY_RETRY }
     })
   }
 
